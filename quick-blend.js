@@ -139,46 +139,78 @@ async function generateBlend() {
     return;
   }
   // Single user testing support
-  let token1 = USER1_TOKEN;
-  let token2 = USER2_TOKEN;
-  if (!USER1_TOKEN && USER2_TOKEN) token1 = USER2_TOKEN;
-  if (!USER2_TOKEN && USER1_TOKEN) token2 = USER1_TOKEN;
+  const fs = await import('fs');
+  function getLatestToken(userKey) {
+    if (fs.existsSync('.tokens.json')) {
+      const allTokens = JSON.parse(fs.readFileSync('.tokens.json', 'utf8'));
+      return allTokens[userKey]?.accessToken || null;
+    }
+    return null;
+  }
+  let token1 = getLatestToken('user') || USER1_TOKEN;
+  let token2 = getLatestToken('user2') || USER2_TOKEN;
+  if (!token1 && token2) token1 = token2;
+  if (!token2 && token1) token2 = token1;
   if (token1 === token2) {
-  console.log('Single user mode: using the same token for both users. Some blend features will be less meaningful.');
+    console.log('Single user mode: using the same token for both users. Some blend features will be less meaningful.');
   }
 
   try {
-  // Get data for both users
-  console.log('Fetching User 1 data...');
-  const user1Data = await getUserData(token1);
-    
-  console.log('Fetching User 2 data...');
-  const user2Data = await getUserData(token2);
-    
-  console.log('Creating blend algorithm...');
-      const blendTracks = await createBlend(user1Data, user2Data);
-    
-  console.log('Creating playlist...');
-    const playlistUrl = await createPlaylist(USER1_TOKEN, blendTracks, user1Data.user, user2Data.user);
-    
-  console.log(`\nBlend created successfully!`);
-  console.log(`Playlist: ${playlistUrl}`);
-  console.log(`${blendTracks.length} tracks added`);
-    
+    // Get data for both users, refresh tokens if needed
+    console.log('Fetching User 1 data...');
+    let user1Data;
+    try {
+      user1Data = await getUserData(token1);
+    } catch (err) {
+      if (err.response && err.response.status === 401) {
+        console.log('User 1 token expired, refreshing...');
+        const { refreshAccessToken } = await import('./my-blend/spotify.js');
+        await refreshAccessToken('user');
+        token1 = getLatestToken('user');
+        user1Data = await getUserData(token1);
+      } else {
+        throw err;
+      }
+    }
+
+    console.log('Fetching User 2 data...');
+    let user2Data;
+    try {
+      user2Data = await getUserData(token2);
+    } catch (err) {
+      if (err.response && err.response.status === 401) {
+        console.log('User 2 token expired, refreshing...');
+        const { refreshAccessToken } = await import('./my-blend/spotify.js');
+        await refreshAccessToken('user2');
+        token2 = getLatestToken('user2');
+        user2Data = await getUserData(token2);
+      } else {
+        throw err;
+      }
+    }
+
+    console.log('Creating blend algorithm...');
+    const blendTracks = await createBlend(user1Data, user2Data);
+
+    console.log('Creating playlist...');
+    const playlistUrl = await createPlaylist(token1, blendTracks, user1Data.user, user2Data.user);
+
+    console.log(`\nBlend created successfully!`);
+    console.log(`Playlist: ${playlistUrl}`);
+    console.log(`${blendTracks.length} tracks added`);
+
     // Show some stats
     const genres1 = extractGenres(user1Data.artists);
     const genres2 = extractGenres(user2Data.artists);
     const sharedGenres = genres1.filter(g => genres2.includes(g));
-    
-  console.log(`\nBlend Stats:`);
-  console.log(`   Shared genres: ${sharedGenres.length > 0 ? sharedGenres.slice(0, 3).join(', ') : 'None found'}`);
-  console.log(`   User 1 favorites: ${Math.round(blendTracks.filter(t => t.source === 'user1').length / blendTracks.length * 100)}%`);
-  console.log(`   User 2 favorites: ${Math.round(blendTracks.filter(t => t.source === 'user2').length / blendTracks.length * 100)}%`);
-  console.log(`   Discovery tracks: ${Math.round(blendTracks.filter(t => t.source === 'discovery').length / blendTracks.length * 100)}%`);
-    
+
+    console.log(`\nBlend Stats:`);
+    console.log(`   Shared genres: ${sharedGenres.length > 0 ? sharedGenres.slice(0, 3).join(', ') : 'None found'}`);
+    console.log(`   User 1 favorites: ${Math.round(blendTracks.filter(t => t.source === 'user1').length / blendTracks.length * 100)}%`);
+    console.log(`   User 2 favorites: ${Math.round(blendTracks.filter(t => t.source === 'user2').length / blendTracks.length * 100)}%`);
+    console.log(`   Discovery tracks: ${Math.round(blendTracks.filter(t => t.source === 'discovery').length / blendTracks.length * 100)}%`);
   } catch (error) {
-  console.error('Error generating blend:', error.message);
-    
+    console.error('Error generating blend:', error.message);
     if (error.message.includes('401')) {
       console.log('\nYour tokens might have expired. Run: node setup-tokens.js');
     }

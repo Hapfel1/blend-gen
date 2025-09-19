@@ -1,3 +1,4 @@
+// Spotify API helpers and token management
 import 'dotenv/config';
 import fs from 'fs';
 import { SpotifyAPI } from '@statsfm/spotify.js';
@@ -6,8 +7,7 @@ const CLIENT_ID = process.env.SPOTIFY_CLIENT_ID;
 const CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET;
 const REDIRECT_URI = process.env.SPOTIFY_REDIRECT_URI || 'https://hapfel.org/callback';
 
-// Scopes we need for the blend
-const SCOPES = [
+export const SCOPES = [
   'user-read-private',
   'user-read-email',
   'user-top-read',
@@ -25,12 +25,10 @@ export function getAuthURL() {
     redirect_uri: REDIRECT_URI,
     state: Math.random().toString(36).substring(7)
   });
-  
   return `https://accounts.spotify.com/authorize?${params.toString()}`;
 }
 
-export async function getTokenFromCode(code) {
-  // Securely store tokens in .tokens.json
+export async function getTokenFromCode(code, user = 'user') {
   function saveTokens(user, tokens) {
     let allTokens = {};
     if (fs.existsSync('.tokens.json')) {
@@ -39,13 +37,6 @@ export async function getTokenFromCode(code) {
     allTokens[user] = tokens;
     fs.writeFileSync('.tokens.json', JSON.stringify(allTokens, null, 2));
   }
-  const api = new SpotifyAPI({
-    clientCredentials: {
-      clientId: CLIENT_ID,
-      clientSecret: CLIENT_SECRET,
-    }
-  });
-
   try {
     const response = await fetch('https://accounts.spotify.com/api/token', {
       method: 'POST',
@@ -59,16 +50,9 @@ export async function getTokenFromCode(code) {
         redirect_uri: REDIRECT_URI
       })
     });
-
-  const data = await response.json();
-  console.log('Full token response:', data);
-    
-    if (data.error) {
-      throw new Error(data.error_description);
-    }
-    
-    // Save tokens securely for later refresh
-    saveTokens('user', {
+    const data = await response.json();
+    if (data.error) throw new Error(data.error_description);
+    saveTokens(user, {
       accessToken: data.access_token,
       refreshToken: data.refresh_token,
       expiresIn: data.expires_in,
@@ -79,8 +63,13 @@ export async function getTokenFromCode(code) {
       refreshToken: data.refresh_token,
       expiresIn: data.expires_in
     };
-// Function to refresh access token using stored refresh token
-async function refreshAccessToken(user = 'user') {
+  } catch (error) {
+    console.error('Error getting token:', error);
+    throw error;
+  }
+}
+
+export async function refreshAccessToken(user = 'user') {
   if (!fs.existsSync('.tokens.json')) throw new Error('No token file found');
   const allTokens = JSON.parse(fs.readFileSync('.tokens.json', 'utf8'));
   const tokens = allTokens[user];
@@ -98,20 +87,13 @@ async function refreshAccessToken(user = 'user') {
   });
   const data = await response.json();
   if (data.error) throw new Error(data.error_description);
-  // Update stored access token
   tokens.accessToken = data.access_token;
   tokens.expiresIn = data.expires_in;
   allTokens[user] = tokens;
   fs.writeFileSync('.tokens.json', JSON.stringify(allTokens, null, 2));
   return tokens.accessToken;
 }
-  } catch (error) {
-    console.error('Error getting token:', error);
-    throw error;
-  }
-}
 
-// Helper to get user info for verification
 export async function getUserInfo(accessToken) {
   const api = new SpotifyAPI({
     clientCredentials: {
@@ -120,17 +102,11 @@ export async function getUserInfo(accessToken) {
     },
     accessToken: accessToken
   });
-
   try {
     const user = await api.me.get();
     return user;
   } catch (error) {
     console.error('Error getting user info:', error);
-    if (error.response) {
-      console.error('Spotify error response:', error.response.data);
-      console.error('Status:', error.response.status);
-      console.error('Headers:', error.response.headers);
-    }
     throw error;
   }
 }
