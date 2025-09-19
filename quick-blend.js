@@ -17,9 +17,12 @@ function shuffleTracks(tracks) {
   }
   // Spread same artist tracks apart
   for (let i = 1; i < shuffled.length - 1; i++) {
-    if (shuffled[i].artists[0].id === shuffled[i-1].artists[0].id) {
+    if (!Array.isArray(shuffled[i].artists) || shuffled[i].artists.length === 0) continue;
+    if (!Array.isArray(shuffled[i-1].artists) || shuffled[i-1].artists.length === 0) continue;
+    if (shuffled[i].artists[0]?.id === shuffled[i-1].artists[0]?.id) {
       for (let j = i + 1; j < shuffled.length; j++) {
-        if (shuffled[j].artists[0].id !== shuffled[i-1].artists[0].id) {
+        if (!Array.isArray(shuffled[j].artists) || shuffled[j].artists.length === 0) continue;
+        if (shuffled[j].artists[0]?.id !== shuffled[i-1].artists[0]?.id) {
           [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
           break;
         }
@@ -389,35 +392,52 @@ async function createBlend(user1Data, user2Data) {
 
   // 2. Top tracks from both users (short, medium, long term, liked songs, saved albums, playlists)
   const allTopTracks = [
-    ...user1Data.shortTerm,
-    ...user2Data.shortTerm,
-    ...user1Data.mediumTerm,
-    ...user2Data.mediumTerm,
-    ...user1Data.longTerm,
-    ...user2Data.longTerm,
-    ...user1Data.likedSongs,
-    ...user2Data.likedSongs,
-    ...user1Data.savedAlbumTracks,
-    ...user2Data.savedAlbumTracks,
-    ...user1Data.playlistTracks,
-    ...user2Data.playlistTracks
+    ...(user1Data.shortTerm || []),
+    ...(user2Data.shortTerm || []),
+    ...(user1Data.mediumTerm || []),
+    ...(user2Data.mediumTerm || []),
+    ...(user1Data.longTerm || []),
+    ...(user2Data.longTerm || []),
+    ...(user1Data.likedSongs || []),
+    ...(user2Data.likedSongs || []),
+    ...(user1Data.savedAlbumTracks || []),
+    ...(user2Data.savedAlbumTracks || []),
+    ...(user1Data.playlistTracks || []),
+    ...(user2Data.playlistTracks || [])
   ];
   // Prioritize tracks with shared artists
-  const user1ArtistIds = new Set(user1Data.artists.map(a => a.id));
-  const user2ArtistIds = new Set(user2Data.artists.map(a => a.id));
+  const user1ArtistIds = new Set((user1Data.artists || []).map(a => a.id));
+  const user2ArtistIds = new Set((user2Data.artists || []).map(a => a.id));
+  console.log(`Blend step: shared-artist selection`);
   for (const track of allTopTracks) {
+    if (!track || typeof track !== 'object') {
+      console.log('Skipping track (null or not object):', track);
+      continue;
+    }
+    if (!Array.isArray(track.artists) || track.artists.length === 0) {
+      console.log('Skipping track (no artists):', track && track.name, track && track.id);
+      continue;
+    }
     const mainArtist = track.artists[0]?.id;
-    if (user1ArtistIds.has(mainArtist) && user2ArtistIds.has(mainArtist) && tracks.length < targetLength * 0.5) {
+    if (mainArtist && user1ArtistIds.has(mainArtist) && user2ArtistIds.has(mainArtist) && tracks.length < targetLength * 0.5) {
       if (!historyIds.includes(track.id)) {
         tracks.push({ ...track, source: 'shared-artist' });
       }
     }
   }
 
-  // 3. Fill with diverse tracks by genre and artist
+  console.log(`Blend step: diversity selection`);
   const genreCount = {};
   const artistCount = {};
   for (const track of allTopTracks) {
+    if (!track || typeof track !== 'object') {
+      console.log('Skipping track (null or not object):', track);
+      continue;
+    }
+    if (!Array.isArray(track.artists) || track.artists.length === 0) {
+      console.log('Skipping track (no artists):', track && track.name, track && track.id);
+      continue;
+    }
     const mainArtist = track.artists[0]?.id;
     artistCount[mainArtist] = (artistCount[mainArtist] || 0) + 1;
     if (artistCount[mainArtist] > 2) continue;

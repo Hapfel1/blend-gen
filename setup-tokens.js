@@ -39,14 +39,23 @@ async function setupTokens() {
     let envContent = fs.readFileSync('.env', 'utf8');
     envContent = envContent.replace(/USER1_TOKEN=.*/, `USER1_TOKEN=${tokens1.accessToken}`);
     envContent = envContent.replace(/USER2_TOKEN=.*/, `USER2_TOKEN=${tokens2.accessToken}`);
-    
+
     // Add user info as comments
     envContent += `\n# User 1: ${user1.display_name} (${user1.id})`;
     envContent += `\n# User 2: ${user2.display_name} (${user2.id})`;
-    
+
     fs.writeFileSync('.env', envContent);
-    
-  console.log('Setup complete! Your tokens have been saved to .env');
+
+    // Save both users to .tokens.json
+    let allTokens = {};
+    if (fs.existsSync('.tokens.json')) {
+      allTokens = JSON.parse(fs.readFileSync('.tokens.json', 'utf8'));
+    }
+    allTokens['user'] = tokens1;
+    allTokens['user2'] = tokens2;
+    fs.writeFileSync('.tokens.json', JSON.stringify(allTokens, null, 2));
+
+    console.log('Setup complete! Your tokens have been saved to .env and .tokens.json');
     console.log('Now you can run: npm run blend');
     
   } catch (error) {
