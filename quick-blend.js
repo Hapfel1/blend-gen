@@ -249,9 +249,26 @@ async function getUserData(token) {
 }
 
 async function createBlend(user1Data, user2Data) {
+  const fs = await import('fs/promises');
+  const historyPath = 'c:/Users/quird/code/my-blend/.blend-history.json';
+  let historyIds = [];
+  try {
+    const historyRaw = await fs.readFile(historyPath, 'utf8');
+    const historyData = JSON.parse(historyRaw);
+    // Support multiple blends: { blends: [ { trackIds: [...] }, ... ] }
+    if (Array.isArray(historyData.blends)) {
+      // Get trackIds from last two blends
+      const lastBlends = historyData.blends.slice(-2);
+      historyIds = lastBlends.flatMap(b => b.trackIds || []);
+    } else if (Array.isArray(historyData.trackIds)) {
+      // Legacy: single blend
+      historyIds = historyData.trackIds;
+    }
+  } catch (err) {
+    // No history file yet
+  }
+
   const tracks = [];
-  
-  // Only use available endpoints: top tracks, recently played, top artists, genres
   const targetLength = 50;
 
   // 1. Shared recent tracks
@@ -259,7 +276,9 @@ async function createBlend(user1Data, user2Data) {
   const user2RecentIds = new Set(user2Data.recentTracks.map(t => t.id));
   const sharedRecent = user1Data.recentTracks.filter(t => user2RecentIds.has(t.id));
   for (let i = 0; i < sharedRecent.length && tracks.length < targetLength * 0.3; i++) {
-    tracks.push({ ...sharedRecent[i], source: 'shared-recent' });
+    if (!historyIds.includes(sharedRecent[i].id)) {
+      tracks.push({ ...sharedRecent[i], source: 'shared-recent' });
+    }
   }
 
   // 2. Top tracks from both users (short, medium, long term)
@@ -277,7 +296,9 @@ async function createBlend(user1Data, user2Data) {
   for (const track of allTopTracks) {
     const mainArtist = track.artists[0]?.id;
     if (user1ArtistIds.has(mainArtist) && user2ArtistIds.has(mainArtist) && tracks.length < targetLength * 0.5) {
-      tracks.push({ ...track, source: 'shared-artist' });
+      if (!historyIds.includes(track.id)) {
+        tracks.push({ ...track, source: 'shared-artist' });
+      }
     }
   }
 
@@ -296,12 +317,43 @@ async function createBlend(user1Data, user2Data) {
       if (genreCount[genre] > 5) genreOk = false;
     }
     if (!genreOk) continue;
-    tracks.push({ ...track, source: 'diversity' });
+    if (!historyIds.includes(track.id)) {
+      tracks.push({ ...track, source: 'diversity' });
+    }
     if (tracks.length >= targetLength) break;
+  }
+
+  // 4. Allow up to 10% repeats for favorites if not enough tracks
+  if (tracks.length < targetLength && historyIds.length > 0) {
+    const repeatsAllowed = Math.floor(targetLength * 0.1);
+    let repeatsAdded = 0;
+    for (const track of allTopTracks) {
+      if (tracks.length >= targetLength) break;
+      if (historyIds.includes(track.id) && repeatsAdded < repeatsAllowed) {
+        tracks.push({ ...track, source: 'repeat' });
+        repeatsAdded++;
+      }
+    }
   }
 
   // Remove duplicates and shuffle
   const uniqueTracks = removeDuplicates(tracks);
+
+  // Save new blend history (append to blends array, keep last 2)
+  try {
+    let blends = [];
+    try {
+      const historyRaw = await fs.readFile(historyPath, 'utf8');
+      const historyData = JSON.parse(historyRaw);
+      if (Array.isArray(historyData.blends)) blends = historyData.blends;
+    } catch {}
+    blends.push({ trackIds: uniqueTracks.map(t => t.id) });
+    if (blends.length > 2) blends = blends.slice(-2);
+    await fs.writeFile(historyPath, JSON.stringify({ blends }), 'utf8');
+  } catch (err) {
+    // Ignore write errors
+  }
+
   return shuffleTracks(uniqueTracks).slice(0, targetLength);
 }
 
