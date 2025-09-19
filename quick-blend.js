@@ -203,7 +203,10 @@ async function generateBlend() {
     console.log(`Playlist: ${playlistUrl}`);
     console.log(`${blendTracks.length} tracks added`);
 
-    // Show improved stats
+    // Always show blend stats, with fallback values if blendTracks is empty/null
+    // Filter out null/invalid tracks before stats
+    let validBlendTracks = Array.isArray(blendTracks) ? blendTracks.filter(t => t && typeof t === 'object' && t.id) : [];
+
     const genres1 = extractGenres(user1Data.artists);
     const genres2 = extractGenres(user2Data.artists);
     const sharedGenres = genres1.filter(g => genres2.includes(g));
@@ -238,13 +241,17 @@ async function generateBlend() {
     const playlistOverlapCount = [...user1PlaylistTrackIds].filter(id => user2PlaylistTrackIds.has(id)).length;
 
     // Blend Source Breakdown
-    const sourceCounts = blendTracks.reduce((acc, t) => {
-      acc[t.source] = (acc[t.source] || 0) + 1;
-      return acc;
-    }, {});
+    let sourceCounts = {};
+    if (validBlendTracks.length > 0) {
+      sourceCounts = validBlendTracks.reduce((acc, t) => {
+        acc[t.source] = (acc[t.source] || 0) + 1;
+        return acc;
+      }, {});
+    }
 
     // First-time Blend Tracks
     let historyIds = [];
+    let firstTimeTracks = 0;
     try {
       const fs = await import('fs/promises');
       const historyRaw = await fs.readFile('./.blend-history.json', 'utf8');
@@ -255,17 +262,23 @@ async function generateBlend() {
       } else if (Array.isArray(historyData.trackIds)) {
         historyIds = historyData.trackIds;
       }
+      if (validBlendTracks.length > 0) {
+        firstTimeTracks = validBlendTracks.filter(t => !historyIds.includes(t.id)).length;
+      }
     } catch {}
-    const firstTimeTracks = blendTracks.filter(t => !historyIds.includes(t.id)).length;
 
     console.log(`\nBlend Stats:`);
     console.log(`   Shared genres: ${sharedGenres.length > 0 ? sharedGenres.slice(0, 3).join(', ') : 'None found'}`);
     console.log(`   Taste match: ${tasteMatchPercent}% (artists: ${artistMatchPercent}%, tracks: ${trackMatchPercent}%)`);
     console.log(`   Playlist overlap: ${playlistOverlapCount} tracks`);
     console.log(`   Blend source breakdown:`);
-    Object.entries(sourceCounts).forEach(([source, count]) => {
-      console.log(`      ${source}: ${count}`);
-    });
+    if (Object.keys(sourceCounts).length > 0) {
+      Object.entries(sourceCounts).forEach(([source, count]) => {
+        console.log(`      ${source}: ${count}`);
+      });
+    } else {
+      console.log('      No blend tracks');
+    }
     console.log(`   First-time blend tracks: ${firstTimeTracks}`);
   } catch (error) {
     console.error('Error generating blend:', error.message);
