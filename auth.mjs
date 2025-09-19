@@ -79,8 +79,14 @@ export async function getTokenFromCode(code) {
       refreshToken: data.refresh_token,
       expiresIn: data.expires_in
     };
+  } catch (error) {
+    console.error('Error getting token:', error);
+    throw error;
+  }
+}
+
 // Function to refresh access token using stored refresh token
-async function refreshAccessToken(user = 'user') {
+export async function refreshAccessToken(user = 'user') {
   if (!fs.existsSync('.tokens.json')) throw new Error('No token file found');
   const allTokens = JSON.parse(fs.readFileSync('.tokens.json', 'utf8'));
   const tokens = allTokens[user];
@@ -105,14 +111,10 @@ async function refreshAccessToken(user = 'user') {
   fs.writeFileSync('.tokens.json', JSON.stringify(allTokens, null, 2));
   return tokens.accessToken;
 }
-  } catch (error) {
-    console.error('Error getting token:', error);
-    throw error;
-  }
-}
 
 // Helper to get user info for verification
 export async function getUserInfo(accessToken) {
+
   const api = new SpotifyAPI({
     clientCredentials: {
       clientId: CLIENT_ID,

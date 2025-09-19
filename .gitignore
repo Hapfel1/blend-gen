@@ -6,6 +6,7 @@
 # Customization files
 always-include.json
 block-artists.json
+blend-config.json
 # Node modules
 node_modules/
 # OS/Editor files
