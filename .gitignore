@@ -1,0 +1,10 @@
+# Sensitive files
+.env
+.tokens.json
+.blend-playlist.json
+# Node modules
+node_modules/
+# OS/Editor files
+.DS_Store
+Thumbs.db
+.vscode/
