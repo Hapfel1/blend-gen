@@ -204,6 +204,74 @@ async function getUserData(token) {
     });
     return response.data;
   }
+
+  // Fetch liked songs (saved tracks)
+  async function getLikedSongs(limit = 100) {
+    let liked = [];
+    let nextUrl = `https://api.spotify.com/v1/me/tracks?limit=${limit}`;
+    while (nextUrl) {
+      const res = await axios.get(nextUrl, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      liked = liked.concat(res.data.items.map(item => item.track));
+      nextUrl = res.data.next;
+    }
+    return liked;
+  }
+
+  // Fetch saved albums
+  async function getSavedAlbums(limit = 50) {
+    let albums = [];
+    let nextUrl = `https://api.spotify.com/v1/me/albums?limit=${limit}`;
+    while (nextUrl) {
+      const res = await axios.get(nextUrl, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      albums = albums.concat(res.data.items.map(item => item.album));
+      nextUrl = res.data.next;
+    }
+    // Flatten to tracks
+    let albumTracks = [];
+    for (const album of albums) {
+      if (album.tracks && album.tracks.items) {
+        albumTracks = albumTracks.concat(album.tracks.items);
+      } else if (album.id) {
+        // Fetch album tracks if not included
+        const albumRes = await axios.get(`https://api.spotify.com/v1/albums/${album.id}/tracks`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        albumTracks = albumTracks.concat(albumRes.data.items);
+      }
+    }
+    return albumTracks;
+  }
+
+  // Fetch tracks from public/collaborative playlists
+  async function getPlaylistTracks(limit = 50) {
+    let playlists = [];
+    let nextUrl = `https://api.spotify.com/v1/me/playlists?limit=${limit}`;
+    while (nextUrl) {
+      const res = await axios.get(nextUrl, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      playlists = playlists.concat(res.data.items);
+      nextUrl = res.data.next;
+    }
+    // Filter for public or collaborative playlists
+    playlists = playlists.filter(p => p.public || p.collaborative);
+    let playlistTracks = [];
+    for (const playlist of playlists) {
+      let nextTrackUrl = `https://api.spotify.com/v1/playlists/${playlist.id}/tracks?limit=100`;
+      while (nextTrackUrl) {
+        const trackRes = await axios.get(nextTrackUrl, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        playlistTracks = playlistTracks.concat(trackRes.data.items.map(item => item.track));
+        nextTrackUrl = trackRes.data.next;
+      }
+    }
+    return playlistTracks;
+  }
   const api = new SpotifyAPI({
     clientCredentials: {
       clientId: CLIENT_ID,
@@ -225,13 +293,16 @@ async function getUserData(token) {
     console.log('Params:', { time_range: 'long_term', limit: 10 });
     console.log('Calling api.me.top for medium_term artists');
     console.log('Params:', { time_range: 'medium_term', limit: 20 });
-      const [user, shortTerm, mediumTerm, longTerm, recentTracks, topArtists] = await Promise.all([
+      const [user, shortTerm, mediumTerm, longTerm, recentTracks, topArtists, likedSongs, savedAlbumTracks, playlistTracks] = await Promise.all([
         api.me.get(),
         getTop('tracks', 'short_term', 30),
         getTop('tracks', 'medium_term', 20),
         getTop('tracks', 'long_term', 10),
         api.me.recentlyPlayed({ limit: 20 }),
-        getTop('artists', 'medium_term', 20)
+        getTop('artists', 'medium_term', 20),
+        getLikedSongs(50),
+        getSavedAlbums(20),
+        getPlaylistTracks(20)
       ]);
 
     return {
@@ -240,7 +311,10 @@ async function getUserData(token) {
       mediumTerm: mediumTerm.items,
       longTerm: longTerm.items,
       recentTracks: recentTracks.items.map(item => item.track),
-      artists: topArtists.items
+      artists: topArtists.items,
+      likedSongs,
+      savedAlbumTracks,
+      playlistTracks
     };
   } catch (error) {
     console.error('Error fetching user data:', error);
@@ -281,14 +355,20 @@ async function createBlend(user1Data, user2Data) {
     }
   }
 
-  // 2. Top tracks from both users (short, medium, long term)
+  // 2. Top tracks from both users (short, medium, long term, liked songs, saved albums, playlists)
   const allTopTracks = [
     ...user1Data.shortTerm,
     ...user2Data.shortTerm,
     ...user1Data.mediumTerm,
     ...user2Data.mediumTerm,
     ...user1Data.longTerm,
-    ...user2Data.longTerm
+    ...user2Data.longTerm,
+    ...user1Data.likedSongs,
+    ...user2Data.likedSongs,
+    ...user1Data.savedAlbumTracks,
+    ...user2Data.savedAlbumTracks,
+    ...user1Data.playlistTracks,
+    ...user2Data.playlistTracks
   ];
   // Prioritize tracks with shared artists
   const user1ArtistIds = new Set(user1Data.artists.map(a => a.id));

@@ -2,6 +2,7 @@
 .env
 .tokens.json
 .blend-playlist.json
+.blend-history.json
 # Node modules
 node_modules/
 # OS/Editor files
