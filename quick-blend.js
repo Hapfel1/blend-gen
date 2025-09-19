@@ -45,7 +45,7 @@ import 'dotenv/config';
 // Move createPlaylist above generateBlend to ensure it is defined before use
 async function createPlaylist(token, tracks, user1, user2) {
   const fs = await import('fs/promises');
-  const path = 'c:/Users/quird/code/my-blend/.blend-playlist.json';
+  const path = './.blend-playlist.json';
   const playlistName = `${user1.display_name} + ${user2.display_name}`;
   const description = `Generated blend for ${user1.display_name} + ${user2.display_name}`;
   const userId = user1.id;
@@ -80,7 +80,8 @@ async function createPlaylist(token, tracks, user1, user2) {
         {
           name: playlistName,
           description: description,
-          public: false
+          public: false,
+          collaborative: true
         },
         {
           headers: {
@@ -361,36 +362,85 @@ async function createBlend(user1Data, user2Data) {
   const fs = await import('fs/promises');
   const historyPath = 'c:/Users/quird/code/my-blend/.blend-history.json';
   let historyIds = [];
+  // Load blend history
   try {
     const historyRaw = await fs.readFile(historyPath, 'utf8');
     const historyData = JSON.parse(historyRaw);
-    // Support multiple blends: { blends: [ { trackIds: [...] }, ... ] }
     if (Array.isArray(historyData.blends)) {
-      // Get trackIds from last two blends
       const lastBlends = historyData.blends.slice(-2);
       historyIds = lastBlends.flatMap(b => b.trackIds || []);
     } else if (Array.isArray(historyData.trackIds)) {
-      // Legacy: single blend
       historyIds = historyData.trackIds;
     }
-  } catch (err) {
-    // No history file yet
-  }
+  } catch (err) {}
+
+  // Load always-include and block-artists
+  let alwaysIncludeIds = [];
+  let blockArtistIds = [];
+  try {
+    const alwaysRaw = await fs.readFile('c:/Users/quird/code/my-blend/always-include.json', 'utf8');
+    alwaysIncludeIds = JSON.parse(alwaysRaw);
+  } catch {}
+  try {
+    const blockRaw = await fs.readFile('c:/Users/quird/code/my-blend/block-artists.json', 'utf8');
+    blockArtistIds = JSON.parse(blockRaw);
+  } catch {}
 
   const tracks = [];
   const targetLength = 50;
 
-  // 1. Shared recent tracks
+  // 0. Always include tracks (once, if not blocked)
+  let alwaysIncludedTracks = [];
+  const axios = (await import('axios')).default;
+  for (const tid of alwaysIncludeIds) {
+    // Search all user tracks for this ID
+    const allTracks = [
+      ...(user1Data.shortTerm || []),
+      ...(user2Data.shortTerm || []),
+      ...(user1Data.mediumTerm || []),
+      ...(user2Data.mediumTerm || []),
+      ...(user1Data.longTerm || []),
+      ...(user2Data.longTerm || []),
+      ...(user1Data.likedSongs || []),
+      ...(user2Data.likedSongs || []),
+      ...(user1Data.savedAlbumTracks || []),
+      ...(user2Data.savedAlbumTracks || []),
+      ...(user1Data.playlistTracks || []),
+      ...(user2Data.playlistTracks || [])
+    ];
+    let found = allTracks.find(t => t && t.id === tid);
+    // If not found, fetch from Spotify API
+    if (!found) {
+      try {
+        const res = await axios.get(`https://api.spotify.com/v1/tracks/${tid}`, {
+          headers: { Authorization: `Bearer ${user1Data.user?.accessToken || user2Data.user?.accessToken || process.env.USER1_TOKEN}` }
+        });
+        found = res.data;
+      } catch (err) {
+        console.warn(`Could not fetch track ${tid} from Spotify API:`, err?.response?.data || err.message);
+      }
+    }
+    if (found && Array.isArray(found.artists) && found.artists.length > 0 && !blockArtistIds.includes(found.artists[0].id)) {
+      alwaysIncludedTracks.push({ ...found, source: 'always-include' });
+    }
+  }
+  // Add always-included tracks first (ignore history)
+  for (const t of alwaysIncludedTracks) {
+    tracks.push(t);
+  }
+
+  // 1. Shared recent tracks (skip blocked artists)
   const user1RecentIds = new Set(user1Data.recentTracks.map(t => t.id));
   const user2RecentIds = new Set(user2Data.recentTracks.map(t => t.id));
   const sharedRecent = user1Data.recentTracks.filter(t => user2RecentIds.has(t.id));
   for (let i = 0; i < sharedRecent.length && tracks.length < targetLength * 0.3; i++) {
-    if (!historyIds.includes(sharedRecent[i].id)) {
-      tracks.push({ ...sharedRecent[i], source: 'shared-recent' });
+    const track = sharedRecent[i];
+    if (!historyIds.includes(track.id) && Array.isArray(track.artists) && track.artists.length > 0 && !blockArtistIds.includes(track.artists[0].id)) {
+      tracks.push({ ...track, source: 'shared-recent' });
     }
   }
 
-  // 2. Top tracks from both users (short, medium, long term, liked songs, saved albums, playlists)
+  // 2. Top tracks from both users (skip blocked artists)
   const allTopTracks = [
     ...(user1Data.shortTerm || []),
     ...(user2Data.shortTerm || []),
@@ -405,7 +455,6 @@ async function createBlend(user1Data, user2Data) {
     ...(user1Data.playlistTracks || []),
     ...(user2Data.playlistTracks || [])
   ];
-  // Prioritize tracks with shared artists
   const user1ArtistIds = new Set((user1Data.artists || []).map(a => a.id));
   const user2ArtistIds = new Set((user2Data.artists || []).map(a => a.id));
   console.log(`Blend step: shared-artist selection`);
@@ -419,6 +468,7 @@ async function createBlend(user1Data, user2Data) {
       continue;
     }
     const mainArtist = track.artists[0]?.id;
+    if (blockArtistIds.includes(mainArtist)) continue;
     if (mainArtist && user1ArtistIds.has(mainArtist) && user2ArtistIds.has(mainArtist) && tracks.length < targetLength * 0.5) {
       if (!historyIds.includes(track.id)) {
         tracks.push({ ...track, source: 'shared-artist' });
@@ -439,6 +489,7 @@ async function createBlend(user1Data, user2Data) {
       continue;
     }
     const mainArtist = track.artists[0]?.id;
+    if (blockArtistIds.includes(mainArtist)) continue;
     artistCount[mainArtist] = (artistCount[mainArtist] || 0) + 1;
     if (artistCount[mainArtist] > 2) continue;
     let trackGenres = [];
@@ -455,13 +506,13 @@ async function createBlend(user1Data, user2Data) {
     if (tracks.length >= targetLength) break;
   }
 
-  // 4. Allow up to 10% repeats for favorites if not enough tracks
+  // 4. Allow up to 10% repeats for favorites if not enough tracks (skip blocked artists)
   if (tracks.length < targetLength && historyIds.length > 0) {
     const repeatsAllowed = Math.floor(targetLength * 0.1);
     let repeatsAdded = 0;
     for (const track of allTopTracks) {
       if (tracks.length >= targetLength) break;
-      if (historyIds.includes(track.id) && repeatsAdded < repeatsAllowed) {
+      if (historyIds.includes(track.id) && repeatsAdded < repeatsAllowed && Array.isArray(track.artists) && track.artists.length > 0 && !blockArtistIds.includes(track.artists[0].id)) {
         tracks.push({ ...track, source: 'repeat' });
         repeatsAdded++;
       }

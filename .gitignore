@@ -3,6 +3,9 @@
 .tokens.json
 .blend-playlist.json
 .blend-history.json
+# Customization files
+always-include.json
+block-artists.json
 # Node modules
 node_modules/
 # OS/Editor files
