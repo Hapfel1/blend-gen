@@ -203,16 +203,70 @@ async function generateBlend() {
     console.log(`Playlist: ${playlistUrl}`);
     console.log(`${blendTracks.length} tracks added`);
 
-    // Show some stats
+    // Show improved stats
     const genres1 = extractGenres(user1Data.artists);
     const genres2 = extractGenres(user2Data.artists);
     const sharedGenres = genres1.filter(g => genres2.includes(g));
 
+    // Taste match calculation (based on top artists and top tracks)
+    const user1TopArtistIds = new Set((user1Data.artists || []).map(a => a.id));
+    const user2TopArtistIds = new Set((user2Data.artists || []).map(a => a.id));
+    const sharedArtistCount = [...user1TopArtistIds].filter(id => user2TopArtistIds.has(id)).length;
+    const totalUniqueArtists = new Set([...user1TopArtistIds, ...user2TopArtistIds]).size;
+    const artistMatchPercent = totalUniqueArtists > 0 ? Math.round(sharedArtistCount / totalUniqueArtists * 100) : 0;
+
+    const user1TopTrackIds = new Set([
+      ...(user1Data.shortTerm || []),
+      ...(user1Data.mediumTerm || []),
+      ...(user1Data.longTerm || [])
+    ].map(t => t.id));
+    const user2TopTrackIds = new Set([
+      ...(user2Data.shortTerm || []),
+      ...(user2Data.mediumTerm || []),
+      ...(user2Data.longTerm || [])
+    ].map(t => t.id));
+    const sharedTrackCount = [...user1TopTrackIds].filter(id => user2TopTrackIds.has(id)).length;
+    const totalUniqueTracks = new Set([...user1TopTrackIds, ...user2TopTrackIds]).size;
+    const trackMatchPercent = totalUniqueTracks > 0 ? Math.round(sharedTrackCount / totalUniqueTracks * 100) : 0;
+
+    // Combined taste match (average of artist and track match)
+    const tasteMatchPercent = Math.round((artistMatchPercent + trackMatchPercent) / 2);
+
+    // Playlist Overlap: tracks in both users' playlists
+    const user1PlaylistTrackIds = new Set((user1Data.playlistTracks || []).map(t => t.id));
+    const user2PlaylistTrackIds = new Set((user2Data.playlistTracks || []).map(t => t.id));
+    const playlistOverlapCount = [...user1PlaylistTrackIds].filter(id => user2PlaylistTrackIds.has(id)).length;
+
+    // Blend Source Breakdown
+    const sourceCounts = blendTracks.reduce((acc, t) => {
+      acc[t.source] = (acc[t.source] || 0) + 1;
+      return acc;
+    }, {});
+
+    // First-time Blend Tracks
+    let historyIds = [];
+    try {
+      const fs = await import('fs/promises');
+      const historyRaw = await fs.readFile('./.blend-history.json', 'utf8');
+      const historyData = JSON.parse(historyRaw);
+      if (Array.isArray(historyData.blends)) {
+        const lastBlends = historyData.blends.slice(-2);
+        historyIds = lastBlends.flatMap(b => b.trackIds || []);
+      } else if (Array.isArray(historyData.trackIds)) {
+        historyIds = historyData.trackIds;
+      }
+    } catch {}
+    const firstTimeTracks = blendTracks.filter(t => !historyIds.includes(t.id)).length;
+
     console.log(`\nBlend Stats:`);
     console.log(`   Shared genres: ${sharedGenres.length > 0 ? sharedGenres.slice(0, 3).join(', ') : 'None found'}`);
-    console.log(`   User 1 favorites: ${Math.round(blendTracks.filter(t => t.source === 'user1').length / blendTracks.length * 100)}%`);
-    console.log(`   User 2 favorites: ${Math.round(blendTracks.filter(t => t.source === 'user2').length / blendTracks.length * 100)}%`);
-    console.log(`   Discovery tracks: ${Math.round(blendTracks.filter(t => t.source === 'discovery').length / blendTracks.length * 100)}%`);
+    console.log(`   Taste match: ${tasteMatchPercent}% (artists: ${artistMatchPercent}%, tracks: ${trackMatchPercent}%)`);
+    console.log(`   Playlist overlap: ${playlistOverlapCount} tracks`);
+    console.log(`   Blend source breakdown:`);
+    Object.entries(sourceCounts).forEach(([source, count]) => {
+      console.log(`      ${source}: ${count}`);
+    });
+    console.log(`   First-time blend tracks: ${firstTimeTracks}`);
   } catch (error) {
     console.error('Error generating blend:', error.message);
     if (error.message.includes('401')) {
