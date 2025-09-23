@@ -3,6 +3,7 @@ import { shuffleTracks, removeDuplicates } from './track-utils.js';
 import axios from 'axios';
 
 export async function createBlend(user1Data, user2Data, blendConfig = { blendStyle: 'creative', discoveryPercent: 20, playlistLength: 50 }) {
+  // ...existing code...
 	const fs = await import('fs/promises');
 	const historyPath = 'c:/Users/quird/code/my-blend/.blend-history.json';
 	let historyIds = [];
@@ -17,9 +18,10 @@ export async function createBlend(user1Data, user2Data, blendConfig = { blendSty
     }
   } catch (err) {}
 
-  // Load always-include and block-artists
+  // Load always-include, block-artists, and block-tracks
   let alwaysIncludeIds = [];
   let blockArtistIds = [];
+  let blockTrackIds = [];
   try {
     const alwaysRaw = await fs.readFile('c:/Users/quird/code/my-blend/always-include.json', 'utf8');
     alwaysIncludeIds = JSON.parse(alwaysRaw);
@@ -28,6 +30,30 @@ export async function createBlend(user1Data, user2Data, blendConfig = { blendSty
     const blockRaw = await fs.readFile('c:/Users/quird/code/my-blend/block-artists.json', 'utf8');
     blockArtistIds = JSON.parse(blockRaw);
   } catch {}
+  try {
+    const blockTrackRaw = await fs.readFile('c:/Users/quird/code/my-blend/block-tracks.json', 'utf8');
+    blockTrackIds = JSON.parse(blockTrackRaw);
+  } catch {}
+
+  // Debug: log counts for each source (after initialization)
+  console.log('Source track counts:');
+  console.log('  user1 shortTerm:', (user1Data.shortTerm || []).length);
+  console.log('  user2 shortTerm:', (user2Data.shortTerm || []).length);
+  console.log('  user1 mediumTerm:', (user1Data.mediumTerm || []).length);
+  console.log('  user2 mediumTerm:', (user2Data.mediumTerm || []).length);
+  console.log('  user1 longTerm:', (user1Data.longTerm || []).length);
+  console.log('  user2 longTerm:', (user2Data.longTerm || []).length);
+  console.log('  user1 likedSongs:', (user1Data.likedSongs || []).length);
+  console.log('  user2 likedSongs:', (user2Data.likedSongs || []).length);
+  console.log('  user1 savedAlbumTracks:', (user1Data.savedAlbumTracks || []).length);
+  console.log('  user2 savedAlbumTracks:', (user2Data.savedAlbumTracks || []).length);
+  console.log('  user1 playlistTracks:', (user1Data.playlistTracks || []).length);
+  console.log('  user2 playlistTracks:', (user2Data.playlistTracks || []).length);
+  console.log('  user1 recentTracks:', (user1Data.recentTracks || []).length);
+  console.log('  user2 recentTracks:', (user2Data.recentTracks || []).length);
+  console.log('  alwaysIncludeIds:', alwaysIncludeIds.length);
+  console.log('  blockArtistIds:', blockArtistIds.length);
+  console.log('  blockTrackIds:', blockTrackIds.length);
 
   const tracks = [];
   // Use playlistLength from config
@@ -40,6 +66,9 @@ export async function createBlend(user1Data, user2Data, blendConfig = { blendSty
   // 0. Always include tracks (once, if not blocked)
   let alwaysIncludedTracks = [];
   const axios = (await import('axios')).default;
+  // Import fetchWithRetry from spotify-api.js
+  const { fetchWithRetry } = await import('./spotify-api.js');
+  const { refreshAccessToken } = await import('./auth.mjs');
   for (const tid of alwaysIncludeIds) {
     // Search all user tracks for this ID
     const allTracks = [
@@ -56,7 +85,7 @@ export async function createBlend(user1Data, user2Data, blendConfig = { blendSty
       ...(user1Data.playlistTracks || []),
       ...(user2Data.playlistTracks || [])
     ];
-    let found = allTracks.find(t => t && t.id === tid);
+  let found = allTracks.find(t => t && t.id === tid);
     // If not found, fetch from Spotify API
     if (!found) {
       try {
@@ -68,13 +97,18 @@ export async function createBlend(user1Data, user2Data, blendConfig = { blendSty
         console.warn(`Could not fetch track ${tid} from Spotify API:`, err?.response?.data || err.message);
       }
     }
-    if (found && Array.isArray(found.artists) && found.artists.length > 0 && !blockArtistIds.includes(found.artists[0].id)) {
+    if (
+      found &&
+      Array.isArray(found.artists) && found.artists.length > 0 &&
+      !blockArtistIds.includes(found.artists[0].id) &&
+      !blockTrackIds.includes(found.id)
+    ) {
       alwaysIncludedTracks.push({ ...found, source: 'always-include' });
     }
   }
   // Add always-included tracks first (ignore history)
   for (const t of alwaysIncludedTracks) {
-    tracks.push(t);
+  tracks.push(t);
   }
 
   // 1. Blend logic by style
@@ -101,10 +135,11 @@ export async function createBlend(user1Data, user2Data, blendConfig = { blendSty
   if (blendStyle === 'classic') {
     // Only tracks both users have played, liked, or saved
     for (const track of allTopTracks) {
-      if (!track || typeof track !== 'object') continue;
-      if (!Array.isArray(track.artists) || track.artists.length === 0) continue;
-      const mainArtist = track.artists[0]?.id;
-      if (blockArtistIds.includes(mainArtist)) continue;
+  if (!track || typeof track !== 'object') continue;
+  if (!Array.isArray(track.artists) || track.artists.length === 0) continue;
+  const mainArtist = track.artists[0]?.id;
+  if (blockArtistIds.includes(mainArtist)) continue;
+  if (blockTrackIds.includes(track.id)) continue;
       // Track must appear in both users' pools
       const inUser1 = [
         ...(user1Data.shortTerm || []),
@@ -123,7 +158,7 @@ export async function createBlend(user1Data, user2Data, blendConfig = { blendSty
         ...(user2Data.playlistTracks || [])
       ].some(t => t && t.id === track.id);
       if (inUser1 && inUser2 && !historyIds.includes(track.id)) {
-        tracks.push({ ...track, source: 'classic' });
+  tracks.push({ ...track, source: 'classic' });
       }
       if (tracks.length >= targetLength) break;
     }
@@ -132,43 +167,70 @@ export async function createBlend(user1Data, user2Data, blendConfig = { blendSty
     // Add shared recent tracks first
     for (let i = 0; i < sharedRecent.length && tracks.length < targetLength * 0.2; i++) {
       const track = sharedRecent[i];
-      if (!historyIds.includes(track.id) && Array.isArray(track.artists) && track.artists.length > 0 && !blockArtistIds.includes(track.artists[0].id)) {
+      if (
+        !historyIds.includes(track.id) &&
+        Array.isArray(track.artists) && track.artists.length > 0 &&
+        !blockArtistIds.includes(track.artists[0].id) &&
+        !blockTrackIds.includes(track.id)
+      ) {
         tracks.push({ ...track, source: 'shared-recent' });
       }
     }
     // Add discovery tracks (higher percent)
     if (discoveryPercent > 0 && tracks.length < targetLength) {
       try {
-        const seedArtists = [
+        let seedArtists = [
           ...(user1Data.artists || []).slice(0, 3).map(a => a.id),
           ...(user2Data.artists || []).slice(0, 3).map(a => a.id)
         ].filter(Boolean);
-        const seedGenres = [
+        let seedGenres = [
           ...(user1Data.artists || []).flatMap(a => a.genres || []),
           ...(user2Data.artists || []).flatMap(a => a.genres || [])
-        ];
-        const seedTracks = [
+        ].filter(Boolean);
+        let seedTracks = [
           ...(user1Data.shortTerm || []).slice(0, 3).map(t => t.id),
           ...(user2Data.shortTerm || []).slice(0, 3).map(t => t.id)
         ].filter(Boolean);
-        const seeds = {
-          seed_artists: seedArtists.slice(0, 3).join(','),
-          seed_genres: seedGenres.slice(0, 3).join(','),
-          seed_tracks: seedTracks.slice(0, 2).join(',')
-        };
-        const recRes = await axios.get(`https://api.spotify.com/v1/recommendations?limit=${Math.floor(targetLength * (discoveryPercent / 100))}&${Object.entries(seeds).map(([k, v]) => `${k}=${v}`).join('&')}`, {
-          headers: { Authorization: `Bearer ${user1Data.user?.accessToken || user2Data.user?.accessToken || process.env.USER1_TOKEN}` }
-        });
-        const recTracks = recRes.data.tracks || [];
-        for (const track of recTracks) {
-          if (!track || typeof track !== 'object') continue;
-          if (!Array.isArray(track.artists) || track.artists.length === 0) continue;
-          const mainArtist = track.artists[0]?.id;
-          if (blockArtistIds.includes(mainArtist)) continue;
-          if (!historyIds.includes(track.id)) {
-            tracks.push({ ...track, source: 'wild-discovery' });
+        // Fallback: if all seeds are empty, use top tracks from both users
+        if (seedArtists.length === 0 && seedGenres.length === 0 && seedTracks.length === 0) {
+          seedTracks = [
+            ...(user1Data.shortTerm || []).map(t => t.id),
+            ...(user2Data.shortTerm || []).map(t => t.id)
+          ].filter(Boolean).slice(0, 5);
+        }
+        // FINAL fallback: if still no seeds, use a default popular track
+        if (seedArtists.length === 0 && seedGenres.length === 0 && seedTracks.length === 0) {
+          // Example: "3n3Ppam7vgaVa1iaRUc9Lp" is Blinding Lights by The Weeknd
+          seedTracks = ["3n3Ppam7vgaVa1iaRUc9Lp"];
+        }
+        // Only include non-empty seeds in query
+        const seeds = {};
+        if (seedArtists.length > 0) seeds.seed_artists = seedArtists.slice(0, 3).join(',');
+        if (seedGenres.length > 0) seeds.seed_genres = seedGenres.slice(0, 3).join(',');
+        if (seedTracks.length > 0) seeds.seed_tracks = seedTracks.slice(0, 2).join(',');
+        if (Object.keys(seeds).length === 0) {
+          console.warn('No valid seeds for discovery tracks, skipping recommendations API call.');
+        } else {
+          const recRes = await fetchWithRetry(
+            (tk) => axios.get(`https://api.spotify.com/v1/recommendations?limit=${Math.floor(targetLength * (discoveryPercent / 100))}&${Object.entries(seeds).map(([k, v]) => `${k}=${v}`).join('&')}`, {
+              headers: { Authorization: `Bearer ${user1Data.user?.accessToken || user2Data.user?.accessToken || tk}` }
+            }),
+            user1Data.user?.accessToken || user2Data.user?.accessToken,
+            refreshAccessToken,
+            user1Data.user?.accessToken ? 'user' : 'user2'
+          );
+          const recTracks = recRes.data.tracks || [];
+          for (const track of recTracks) {
+            if (!track || typeof track !== 'object') continue;
+            if (!Array.isArray(track.artists) || track.artists.length === 0) continue;
+            const mainArtist = track.artists[0]?.id;
+            if (blockArtistIds.includes(mainArtist)) continue;
+            if (blockTrackIds.includes(track.id)) continue;
+            if (!historyIds.includes(track.id)) {
+              tracks.push({ ...track, source: 'wild-discovery' });
+            }
+            if (tracks.length >= targetLength) break;
           }
-          if (tracks.length >= targetLength) break;
         }
       } catch (err) {
         console.warn('Could not fetch wild discovery tracks:', err?.response?.data || err.message);
@@ -180,6 +242,7 @@ export async function createBlend(user1Data, user2Data, blendConfig = { blendSty
       if (!Array.isArray(track.artists) || track.artists.length === 0) continue;
       const mainArtist = track.artists[0]?.id;
       if (blockArtistIds.includes(mainArtist)) continue;
+      if (blockTrackIds.includes(track.id)) continue;
       if (!historyIds.includes(track.id)) {
         tracks.push({ ...track, source: 'wild-diversity' });
       }
@@ -189,7 +252,12 @@ export async function createBlend(user1Data, user2Data, blendConfig = { blendSty
     // creative (default): shared recent, shared artists, discovery, diversity
     for (let i = 0; i < sharedRecent.length && tracks.length < targetLength * 0.3; i++) {
       const track = sharedRecent[i];
-      if (!historyIds.includes(track.id) && Array.isArray(track.artists) && track.artists.length > 0 && !blockArtistIds.includes(track.artists[0].id)) {
+      if (
+        !historyIds.includes(track.id) &&
+        Array.isArray(track.artists) && track.artists.length > 0 &&
+        !blockArtistIds.includes(track.artists[0].id) &&
+        !blockTrackIds.includes(track.id)
+      ) {
         tracks.push({ ...track, source: 'shared-recent' });
       }
     }
@@ -198,6 +266,7 @@ export async function createBlend(user1Data, user2Data, blendConfig = { blendSty
       if (!Array.isArray(track.artists) || track.artists.length === 0) continue;
       const mainArtist = track.artists[0]?.id;
       if (blockArtistIds.includes(mainArtist)) continue;
+      if (blockTrackIds.includes(track.id)) continue;
       if (mainArtist && user1ArtistIds.has(mainArtist) && user2ArtistIds.has(mainArtist) && tracks.length < targetLength * 0.5) {
         if (!historyIds.includes(track.id)) {
           tracks.push({ ...track, source: 'shared-artist' });
@@ -206,36 +275,57 @@ export async function createBlend(user1Data, user2Data, blendConfig = { blendSty
     }
     if (discoveryPercent > 0 && tracks.length < targetLength) {
       try {
-        const seedArtists = [
+        let seedArtists = [
           ...(user1Data.artists || []).slice(0, 2).map(a => a.id),
           ...(user2Data.artists || []).slice(0, 2).map(a => a.id)
         ].filter(Boolean);
-        const seedGenres = [
+        let seedGenres = [
           ...(user1Data.artists || []).flatMap(a => a.genres || []),
           ...(user2Data.artists || []).flatMap(a => a.genres || [])
-        ];
-        const seedTracks = [
+        ].filter(Boolean);
+        let seedTracks = [
           ...(user1Data.shortTerm || []).slice(0, 2).map(t => t.id),
           ...(user2Data.shortTerm || []).slice(0, 2).map(t => t.id)
         ].filter(Boolean);
-        const seeds = {
-          seed_artists: seedArtists.slice(0, 2).join(','),
-          seed_genres: seedGenres.slice(0, 2).join(','),
-          seed_tracks: seedTracks.slice(0, 1).join(',')
-        };
-        const recRes = await axios.get(`https://api.spotify.com/v1/recommendations?limit=${Math.floor(targetLength * (discoveryPercent / 100))}&${Object.entries(seeds).map(([k, v]) => `${k}=${v}`).join('&')}`, {
-          headers: { Authorization: `Bearer ${user1Data.user?.accessToken || user2Data.user?.accessToken || process.env.USER1_TOKEN}` }
-        });
-        const recTracks = recRes.data.tracks || [];
-        for (const track of recTracks) {
-          if (!track || typeof track !== 'object') continue;
-          if (!Array.isArray(track.artists) || track.artists.length === 0) continue;
-          const mainArtist = track.artists[0]?.id;
-          if (blockArtistIds.includes(mainArtist)) continue;
-          if (!historyIds.includes(track.id)) {
-            tracks.push({ ...track, source: 'discovery' });
+        // Fallback: if all seeds are empty, use top tracks from both users
+        if (seedArtists.length === 0 && seedGenres.length === 0 && seedTracks.length === 0) {
+          seedTracks = [
+            ...(user1Data.shortTerm || []).map(t => t.id),
+            ...(user2Data.shortTerm || []).map(t => t.id)
+          ].filter(Boolean).slice(0, 5);
+        }
+        // FINAL fallback: if still no seeds, use a default popular track
+        if (seedArtists.length === 0 && seedGenres.length === 0 && seedTracks.length === 0) {
+          seedTracks = ["3n3Ppam7vgaVa1iaRUc9Lp"];
+        }
+        // Only include non-empty seeds in query
+        const seeds = {};
+        if (seedArtists.length > 0) seeds.seed_artists = seedArtists.slice(0, 2).join(',');
+        if (seedGenres.length > 0) seeds.seed_genres = seedGenres.slice(0, 2).join(',');
+        if (seedTracks.length > 0) seeds.seed_tracks = seedTracks.slice(0, 1).join(',');
+        if (Object.keys(seeds).length === 0) {
+          console.warn('No valid seeds for discovery tracks, skipping recommendations API call.');
+        } else {
+          const recRes = await fetchWithRetry(
+            (tk) => axios.get(`https://api.spotify.com/v1/recommendations?limit=${Math.floor(targetLength * (discoveryPercent / 100))}&${Object.entries(seeds).map(([k, v]) => `${k}=${v}`).join('&')}`, {
+              headers: { Authorization: `Bearer ${user1Data.user?.accessToken || user2Data.user?.accessToken || tk}` }
+            }),
+            user1Data.user?.accessToken || user2Data.user?.accessToken,
+            refreshAccessToken,
+            user1Data.user?.accessToken ? 'user' : 'user2'
+          );
+          const recTracks = recRes.data.tracks || [];
+          for (const track of recTracks) {
+            if (!track || typeof track !== 'object') continue;
+            if (!Array.isArray(track.artists) || track.artists.length === 0) continue;
+            const mainArtist = track.artists[0]?.id;
+            if (blockArtistIds.includes(mainArtist)) continue;
+            if (blockTrackIds.includes(track.id)) continue;
+            if (!historyIds.includes(track.id)) {
+              tracks.push({ ...track, source: 'discovery' });
+            }
+            if (tracks.length >= targetLength) break;
           }
-          if (tracks.length >= targetLength) break;
         }
       } catch (err) {
         console.warn('Could not fetch discovery tracks:', err?.response?.data || err.message);
@@ -249,6 +339,7 @@ export async function createBlend(user1Data, user2Data, blendConfig = { blendSty
       if (!Array.isArray(track.artists) || track.artists.length === 0) continue;
       const mainArtist = track.artists[0]?.id;
       if (blockArtistIds.includes(mainArtist)) continue;
+      if (blockTrackIds.includes(track.id)) continue;
       artistCount[mainArtist] = (artistCount[mainArtist] || 0) + 1;
       if (artistCount[mainArtist] > 2) continue;
       let trackGenres = [];
@@ -272,7 +363,13 @@ export async function createBlend(user1Data, user2Data, blendConfig = { blendSty
     let repeatsAdded = 0;
     for (const track of allTopTracks) {
       if (tracks.length >= targetLength) break;
-      if (historyIds.includes(track.id) && repeatsAdded < repeatsAllowed && Array.isArray(track.artists) && track.artists.length > 0 && !blockArtistIds.includes(track.artists[0].id)) {
+      if (
+        historyIds.includes(track.id) &&
+        repeatsAdded < repeatsAllowed &&
+        Array.isArray(track.artists) && track.artists.length > 0 &&
+        !blockArtistIds.includes(track.artists[0].id) &&
+        !blockTrackIds.includes(track.id)
+      ) {
         tracks.push({ ...track, source: 'repeat' });
         repeatsAdded++;
       }
