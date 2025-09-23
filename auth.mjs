@@ -6,7 +6,6 @@ const CLIENT_ID = process.env.SPOTIFY_CLIENT_ID;
 const CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET;
 const REDIRECT_URI = process.env.SPOTIFY_REDIRECT_URI || 'https://hapfel.org/callback';
 
-// Scopes we need for the blend
 const SCOPES = [
   'user-read-private',
   'user-read-email',
@@ -14,8 +13,13 @@ const SCOPES = [
   'user-read-recently-played',
   'playlist-modify-private',
   'playlist-modify-public',
-  'user-library-read'
+  'user-library-read',
+  'user-follow-read',
+  'user-read-playback-position', 
+  'user-read-currently-playing', 
+  'ugc-image-upload'
 ].join(' ');
+
 
 export function getAuthURL() {
   const params = new URLSearchParams({
@@ -25,7 +29,6 @@ export function getAuthURL() {
     redirect_uri: REDIRECT_URI,
     state: Math.random().toString(36).substring(7)
   });
-  
   return `https://accounts.spotify.com/authorize?${params.toString()}`;
 }
 

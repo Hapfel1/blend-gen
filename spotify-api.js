@@ -1,3 +1,62 @@
+// Fetch audio features for a list of track IDs
+export async function getAudioFeatures(token, trackIds, refreshFn = null, userKey = 'user') {
+  if (!Array.isArray(trackIds) || trackIds.length === 0) return {};
+  const features = {};
+  // Spotify API allows up to 100 IDs per request
+  for (let i = 0; i < trackIds.length; i += 100) {
+    const batch = trackIds.slice(i, i + 100);
+    try {
+      const res = await fetchWithRetry(
+        (tk) => axios.get(`https://api.spotify.com/v1/audio-features?ids=${batch.join(',')}`, { headers: { Authorization: `Bearer ${tk}` } }),
+        token, refreshFn, userKey
+      );
+      for (const f of res.data.audio_features) {
+        if (f && f.id) features[f.id] = f;
+      }
+    } catch (err) {
+      console.warn('Failed to fetch audio features:', err?.response?.data || err.message);
+    }
+  }
+  return features;
+}
+// Fetch user's followed artists
+export async function getFollowedArtists(token, refreshFn = null, userKey = 'user', limit = 50) {
+  let artists = [];
+  let nextUrl = `https://api.spotify.com/v1/me/following?type=artist&limit=${limit}`;
+  while (nextUrl) {
+    const res = await fetchWithRetry(
+      (tk) => axios.get(nextUrl, { headers: { Authorization: `Bearer ${tk}` } }),
+      token, refreshFn, userKey
+    );
+    artists = artists.concat(res.data.artists.items);
+    nextUrl = res.data.artists.next;
+  }
+  return artists;
+}
+
+// Fetch new releases for a list of artist IDs
+export async function getNewReleasesForFollowedArtists(token, artistIds, refreshFn = null, userKey = 'user') {
+  let newReleaseTracks = [];
+  for (const artistId of artistIds) {
+    try {
+      const albumsRes = await fetchWithRetry(
+        (tk) => axios.get(`https://api.spotify.com/v1/artists/${artistId}/albums?include_groups=album,single&limit=5`, { headers: { Authorization: `Bearer ${tk}` } }),
+        token, refreshFn, userKey
+      );
+      const albums = albumsRes.data.items;
+      for (const album of albums) {
+        const tracksRes = await fetchWithRetry(
+          (tk) => axios.get(`https://api.spotify.com/v1/albums/${album.id}/tracks`, { headers: { Authorization: `Bearer ${tk}` } }),
+          token, refreshFn, userKey
+        );
+        newReleaseTracks = newReleaseTracks.concat(tracksRes.data.items);
+      }
+    } catch (err) {
+      console.warn(`Failed to fetch new releases for artist ${artistId}:`, err?.response?.data || err.message);
+    }
+  }
+  return newReleaseTracks.filter(t => t && typeof t === 'object' && t.id);
+}
 const CLIENT_ID = process.env.SPOTIFY_CLIENT_ID;
 const CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET;
 import axios from 'axios';
@@ -42,23 +101,47 @@ export async function getUserData(token, refreshFn = null, userKey = 'user') {
 
   async function getTop(type, time_range, limit) {
     const url = `https://api.spotify.com/v1/me/top/${type}?time_range=${time_range}&limit=${limit}`;
-    const res = await fetchWithRetry(
-      (tk) => axios.get(url, { headers: { Authorization: `Bearer ${tk}` } }),
-      token, refreshFn, userKey
-    );
-    return res.data;
+    try {
+      const res = await fetchWithRetry(
+        (tk) => axios.get(url, { headers: { Authorization: `Bearer ${tk}` } }),
+        token, refreshFn, userKey
+      );
+      return res.data;
+    } catch (err) {
+      console.error(`[ERROR] getTop: ${url}`);
+      if (err.response) {
+        console.error('Status:', err.response.status);
+        console.error('Data:', err.response.data);
+        console.error('Headers:', err.response.headers);
+      } else {
+        console.error('Message:', err.message);
+      }
+      throw err;
+    }
   }
 
   async function getLikedSongs(limit = 100) {
     let liked = [];
     let nextUrl = `https://api.spotify.com/v1/me/tracks?limit=${limit}`;
     while (nextUrl) {
-      const res = await fetchWithRetry(
-        (tk) => axios.get(nextUrl, { headers: { Authorization: `Bearer ${tk}` } }),
-        token, refreshFn, userKey
-      );
-      liked = liked.concat(res.data.items.map(item => item.track));
-      nextUrl = res.data.next;
+      try {
+        const res = await fetchWithRetry(
+          (tk) => axios.get(nextUrl, { headers: { Authorization: `Bearer ${tk}` } }),
+          token, refreshFn, userKey
+        );
+        liked = liked.concat(res.data.items.map(item => item.track));
+        nextUrl = res.data.next;
+      } catch (err) {
+        console.error(`[ERROR] getLikedSongs: ${nextUrl}`);
+        if (err.response) {
+          console.error('Status:', err.response.status);
+          console.error('Data:', err.response.data);
+          console.error('Headers:', err.response.headers);
+        } else {
+          console.error('Message:', err.message);
+        }
+        break;
+      }
     }
     return liked;
   }
@@ -75,7 +158,14 @@ export async function getUserData(token, refreshFn = null, userKey = 'user') {
         albums = albums.concat(res.data.items.map(item => item.album));
         nextUrl = res.data.next;
       } catch (err) {
-        console.error('Failed to fetch saved albums:', err.response?.data || err.message);
+        console.error(`[ERROR] getSavedAlbums: ${nextUrl}`);
+        if (err.response) {
+          console.error('Status:', err.response.status);
+          console.error('Data:', err.response.data);
+          console.error('Headers:', err.response.headers);
+        } else {
+          console.error('Message:', err.message);
+        }
         break;
       }
     }
@@ -91,7 +181,14 @@ export async function getUserData(token, refreshFn = null, userKey = 'user') {
           );
           albumTracks = albumTracks.concat(albumRes.data.items);
         } catch (err) {
-          console.error(`Failed to fetch tracks for album ${album.name || album.id}:`, err.response?.data || err.message);
+          console.error(`[ERROR] getSavedAlbums (tracks): album ${album.name || album.id}`);
+          if (err.response) {
+            console.error('Status:', err.response.status);
+            console.error('Data:', err.response.data);
+            console.error('Headers:', err.response.headers);
+          } else {
+            console.error('Message:', err.message);
+          }
         }
       }
     }
@@ -110,7 +207,14 @@ export async function getUserData(token, refreshFn = null, userKey = 'user') {
         playlists = playlists.concat(res.data.items);
         nextUrl = res.data.next;
       } catch (err) {
-        console.error('Failed to fetch playlists:', err.response?.data || err.message);
+        console.error(`[ERROR] getPlaylistTracks: ${nextUrl}`);
+        if (err.response) {
+          console.error('Status:', err.response.status);
+          console.error('Data:', err.response.data);
+          console.error('Headers:', err.response.headers);
+        } else {
+          console.error('Message:', err.message);
+        }
         break;
       }
     }
@@ -127,7 +231,14 @@ export async function getUserData(token, refreshFn = null, userKey = 'user') {
           playlistTracks = playlistTracks.concat(trackRes.data.items.map(item => item.track));
           nextTrackUrl = trackRes.data.next;
         } catch (err) {
-          console.error(`Failed to fetch tracks for playlist ${playlist.name}:`, err.response?.data || err.message);
+          console.error(`[ERROR] getPlaylistTracks (tracks): playlist ${playlist.name}`);
+          if (err.response) {
+            console.error('Status:', err.response.status);
+            console.error('Data:', err.response.data);
+            console.error('Headers:', err.response.headers);
+          } else {
+            console.error('Message:', err.message);
+          }
           break;
         }
       }
@@ -148,23 +259,80 @@ export async function getUserData(token, refreshFn = null, userKey = 'user') {
   try {
     console.log('Calling api.me.top for short_term tracks');
     console.log('Params:', { time_range: 'short_term', limit: 30 });
+    let shortTerm;
+    try {
+      shortTerm = await getTop('tracks', 'short_term', 30);
+    } catch (err) {
+      console.error('[MAIN BLOCK ERROR] shortTerm:', err.response?.data || err.message);
+      throw err;
+    }
     console.log('Calling api.me.top for medium_term tracks');
     console.log('Params:', { time_range: 'medium_term', limit: 20 });
+    let mediumTerm;
+    try {
+      mediumTerm = await getTop('tracks', 'medium_term', 20);
+    } catch (err) {
+      console.error('[MAIN BLOCK ERROR] mediumTerm:', err.response?.data || err.message);
+      throw err;
+    }
     console.log('Calling api.me.top for long_term tracks');
     console.log('Params:', { time_range: 'long_term', limit: 10 });
+    let longTerm;
+    try {
+      longTerm = await getTop('tracks', 'long_term', 10);
+    } catch (err) {
+      console.error('[MAIN BLOCK ERROR] longTerm:', err.response?.data || err.message);
+      throw err;
+    }
+    console.log('Calling api.me.recentlyPlayed');
+    let recentTracks;
+    try {
+      recentTracks = await api.me.recentlyPlayed({ limit: 20 });
+    } catch (err) {
+      console.error('[MAIN BLOCK ERROR] recentlyPlayed:', err.response?.data || err.message);
+      throw err;
+    }
     console.log('Calling api.me.top for medium_term artists');
     console.log('Params:', { time_range: 'medium_term', limit: 20 });
-    const [user, shortTerm, mediumTerm, longTerm, recentTracks, topArtists, likedSongs, savedAlbumTracks, playlistTracks] = await Promise.all([
-      api.me.get(),
-      getTop('tracks', 'short_term', 30),
-      getTop('tracks', 'medium_term', 20),
-      getTop('tracks', 'long_term', 10),
-      api.me.recentlyPlayed({ limit: 20 }),
-      getTop('artists', 'medium_term', 20),
-      getLikedSongs(50),
-      getSavedAlbums(20),
-      getPlaylistTracks(20)
-    ]);
+    let topArtists;
+    try {
+      topArtists = await getTop('artists', 'medium_term', 20);
+    } catch (err) {
+      console.error('[MAIN BLOCK ERROR] topArtists:', err.response?.data || err.message);
+      throw err;
+    }
+    console.log('Calling getLikedSongs');
+    let likedSongs;
+    try {
+      likedSongs = await getLikedSongs(50);
+    } catch (err) {
+      console.error('[MAIN BLOCK ERROR] likedSongs:', err.response?.data || err.message);
+      throw err;
+    }
+    console.log('Calling getSavedAlbums');
+    let savedAlbumTracks;
+    try {
+      savedAlbumTracks = await getSavedAlbums(20);
+    } catch (err) {
+      console.error('[MAIN BLOCK ERROR] savedAlbumTracks:', err.response?.data || err.message);
+      throw err;
+    }
+    console.log('Calling getPlaylistTracks');
+    let playlistTracks;
+    try {
+      playlistTracks = await getPlaylistTracks(20);
+    } catch (err) {
+      console.error('[MAIN BLOCK ERROR] playlistTracks:', err.response?.data || err.message);
+      throw err;
+    }
+
+    let user;
+    try {
+      user = await api.me.get();
+    } catch (err) {
+      console.error('[MAIN BLOCK ERROR] api.me.get:', err.response?.data || err.message);
+      throw err;
+    }
 
     return {
       user,
@@ -178,7 +346,7 @@ export async function getUserData(token, refreshFn = null, userKey = 'user') {
       playlistTracks
     };
   } catch (error) {
-    console.error('Error fetching user data:', error);
+    console.error('[MAIN BLOCK ERROR] userData:', error.response?.data || error.message);
     throw error;
   }
 }

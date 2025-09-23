@@ -67,6 +67,11 @@ async function generateBlend() {
       }
     }
 
+    // Fetch followed artists and new releases for user 1
+    const { getFollowedArtists, getNewReleasesForFollowedArtists } = await import('./spotify-api.js');
+    let user1FollowedArtists = await getFollowedArtists(token1, null, 'user');
+    let user1NewReleaseTracks = await getNewReleasesForFollowedArtists(token1, user1FollowedArtists.map(a => a.id), null, 'user');
+
     console.log('Fetching User 2 data...');
     let user2Data;
     try {
@@ -83,8 +88,16 @@ async function generateBlend() {
       }
     }
 
+    // Fetch followed artists and new releases for user 2
+    let user2FollowedArtists = await getFollowedArtists(token2, null, 'user2');
+    let user2NewReleaseTracks = await getNewReleasesForFollowedArtists(token2, user2FollowedArtists.map(a => a.id), null, 'user2');
+
     console.log('Creating blend algorithm...');
-    let blendTracks = await createBlend(user1Data, user2Data, blendConfig);
+    let blendTracks = await createBlend(
+      { ...user1Data, newReleaseTracks: user1NewReleaseTracks },
+      { ...user2Data, newReleaseTracks: user2NewReleaseTracks },
+      blendConfig
+    );
     // Filter out null/invalid tracks before playlist creation and stats
     blendTracks = Array.isArray(blendTracks) ? blendTracks.filter(t => t && typeof t === 'object' && t.id) : [];
     if (blendTracks.length === 0) {

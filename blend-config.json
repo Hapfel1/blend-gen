@@ -1,5 +1,24 @@
 {
   "blendStyle": "creative",
   "discoveryPercent": 5,
-  "playlistLength": 60
+  "playlistLength": 60,
+  "sources": {
+    "shortTerm": true,
+    "mediumTerm": true,
+    "longTerm": true,
+    "likedSongs": true,
+    "savedAlbumTracks": true,
+    "playlistTracks": true,
+    "recentTracks": true,
+    "newReleaseTracks": true,
+    "alwaysInclude": true
+  },
+  "weighting": {
+    "playCount": true,
+    "recency": true
+  },
+  "audioFeatures": {
+    "enabled": false,
+    "match": ["energy", "danceability", "valence"]
+  }
 }

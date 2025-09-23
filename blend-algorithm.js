@@ -3,6 +3,23 @@ import { shuffleTracks, removeDuplicates } from './track-utils.js';
 import axios from 'axios';
 
 export async function createBlend(user1Data, user2Data, blendConfig = { blendStyle: 'creative', discoveryPercent: 20, playlistLength: 50 }) {
+  // Add debug log for new releases
+  console.log('  user1 newReleaseTracks:', (user1Data.newReleaseTracks || []).length);
+  console.log('  user2 newReleaseTracks:', (user2Data.newReleaseTracks || []).length);
+  // Load sources config
+  const sources = blendConfig.sources || {
+    shortTerm: true,
+    mediumTerm: true,
+    longTerm: true,
+    likedSongs: true,
+    savedAlbumTracks: true,
+    playlistTracks: true,
+    recentTracks: true,
+    newReleaseTracks: true,
+    alwaysInclude: true
+  };
+  const weighting = blendConfig.weighting || { playCount: false, recency: false };
+  const audioFeaturesConfig = blendConfig.audioFeatures || { enabled: false, match: [] };
   // ...existing code...
 	const fs = await import('fs/promises');
 	const historyPath = 'c:/Users/quird/code/my-blend/.blend-history.json';
@@ -37,20 +54,38 @@ export async function createBlend(user1Data, user2Data, blendConfig = { blendSty
 
   // Debug: log counts for each source (after initialization)
   console.log('Source track counts:');
-  console.log('  user1 shortTerm:', (user1Data.shortTerm || []).length);
-  console.log('  user2 shortTerm:', (user2Data.shortTerm || []).length);
-  console.log('  user1 mediumTerm:', (user1Data.mediumTerm || []).length);
-  console.log('  user2 mediumTerm:', (user2Data.mediumTerm || []).length);
-  console.log('  user1 longTerm:', (user1Data.longTerm || []).length);
-  console.log('  user2 longTerm:', (user2Data.longTerm || []).length);
-  console.log('  user1 likedSongs:', (user1Data.likedSongs || []).length);
-  console.log('  user2 likedSongs:', (user2Data.likedSongs || []).length);
-  console.log('  user1 savedAlbumTracks:', (user1Data.savedAlbumTracks || []).length);
-  console.log('  user2 savedAlbumTracks:', (user2Data.savedAlbumTracks || []).length);
-  console.log('  user1 playlistTracks:', (user1Data.playlistTracks || []).length);
-  console.log('  user2 playlistTracks:', (user2Data.playlistTracks || []).length);
-  console.log('  user1 recentTracks:', (user1Data.recentTracks || []).length);
-  console.log('  user2 recentTracks:', (user2Data.recentTracks || []).length);
+  if (sources.shortTerm) {
+    console.log('  user1 shortTerm:', (user1Data.shortTerm || []).length);
+    console.log('  user2 shortTerm:', (user2Data.shortTerm || []).length);
+  }
+  if (sources.mediumTerm) {
+    console.log('  user1 mediumTerm:', (user1Data.mediumTerm || []).length);
+    console.log('  user2 mediumTerm:', (user2Data.mediumTerm || []).length);
+  }
+  if (sources.longTerm) {
+    console.log('  user1 longTerm:', (user1Data.longTerm || []).length);
+    console.log('  user2 longTerm:', (user2Data.longTerm || []).length);
+  }
+  if (sources.likedSongs) {
+    console.log('  user1 likedSongs:', (user1Data.likedSongs || []).length);
+    console.log('  user2 likedSongs:', (user2Data.likedSongs || []).length);
+  }
+  if (sources.savedAlbumTracks) {
+    console.log('  user1 savedAlbumTracks:', (user1Data.savedAlbumTracks || []).length);
+    console.log('  user2 savedAlbumTracks:', (user2Data.savedAlbumTracks || []).length);
+  }
+  if (sources.playlistTracks) {
+    console.log('  user1 playlistTracks:', (user1Data.playlistTracks || []).length);
+    console.log('  user2 playlistTracks:', (user2Data.playlistTracks || []).length);
+  }
+  if (sources.recentTracks) {
+    console.log('  user1 recentTracks:', (user1Data.recentTracks || []).length);
+    console.log('  user2 recentTracks:', (user2Data.recentTracks || []).length);
+  }
+  if (sources.newReleaseTracks) {
+    console.log('  user1 newReleaseTracks:', (user1Data.newReleaseTracks || []).length);
+    console.log('  user2 newReleaseTracks:', (user2Data.newReleaseTracks || []).length);
+  }
   console.log('  alwaysIncludeIds:', alwaysIncludeIds.length);
   console.log('  blockArtistIds:', blockArtistIds.length);
   console.log('  blockTrackIds:', blockTrackIds.length);
@@ -115,20 +150,29 @@ export async function createBlend(user1Data, user2Data, blendConfig = { blendSty
   const user1RecentIds = new Set(user1Data.recentTracks.map(t => t.id));
   const user2RecentIds = new Set(user2Data.recentTracks.map(t => t.id));
   const sharedRecent = user1Data.recentTracks.filter(t => user2RecentIds.has(t.id));
-  const allTopTracks = [
-    ...(user1Data.shortTerm || []),
-    ...(user2Data.shortTerm || []),
-    ...(user1Data.mediumTerm || []),
-    ...(user2Data.mediumTerm || []),
-    ...(user1Data.longTerm || []),
-    ...(user2Data.longTerm || []),
-    ...(user1Data.likedSongs || []),
-    ...(user2Data.likedSongs || []),
-    ...(user1Data.savedAlbumTracks || []),
-    ...(user2Data.savedAlbumTracks || []),
-    ...(user1Data.playlistTracks || []),
-    ...(user2Data.playlistTracks || [])
-  ];
+  // Build allTopTracks based on sources config
+  let allTopTracks = [];
+  if (sources.shortTerm) {
+    allTopTracks.push(...(user1Data.shortTerm || []), ...(user2Data.shortTerm || []));
+  }
+  if (sources.mediumTerm) {
+    allTopTracks.push(...(user1Data.mediumTerm || []), ...(user2Data.mediumTerm || []));
+  }
+  if (sources.longTerm) {
+    allTopTracks.push(...(user1Data.longTerm || []), ...(user2Data.longTerm || []));
+  }
+  if (sources.likedSongs) {
+    allTopTracks.push(...(user1Data.likedSongs || []), ...(user2Data.likedSongs || []));
+  }
+  if (sources.savedAlbumTracks) {
+    allTopTracks.push(...(user1Data.savedAlbumTracks || []), ...(user2Data.savedAlbumTracks || []));
+  }
+  if (sources.playlistTracks) {
+    allTopTracks.push(...(user1Data.playlistTracks || []), ...(user2Data.playlistTracks || []));
+  }
+  if (sources.newReleaseTracks) {
+    allTopTracks.push(...(user1Data.newReleaseTracks || []), ...(user2Data.newReleaseTracks || []));
+  }
   const user1ArtistIds = new Set((user1Data.artists || []).map(a => a.id));
   const user2ArtistIds = new Set((user2Data.artists || []).map(a => a.id));
 
@@ -373,6 +417,37 @@ export async function createBlend(user1Data, user2Data, blendConfig = { blendSty
         tracks.push({ ...track, source: 'repeat' });
         repeatsAdded++;
       }
+    }
+  }
+
+  // Weighting by play count/recency
+  if (weighting.playCount || weighting.recency) {
+    // Assign score to each track
+    for (const track of allTopTracks) {
+      let score = 0;
+      if (weighting.playCount && typeof track.playCount === 'number') score += track.playCount;
+      if (weighting.recency && typeof track.playedAt === 'number') score += (Date.now() - track.playedAt) / (1000 * 60 * 60 * 24); // days ago
+      track._score = score;
+    }
+    // Sort by score descending
+    allTopTracks = allTopTracks.sort((a, b) => (b._score || 0) - (a._score || 0));
+  }
+
+  // Audio features matching
+  if (audioFeaturesConfig.enabled && Array.isArray(audioFeaturesConfig.match) && audioFeaturesConfig.match.length > 0) {
+    const { getAudioFeatures } = await import('./spotify-api.js');
+    const allTrackIds = allTopTracks.map(t => t.id).filter(Boolean);
+    const features = await getAudioFeatures(user1Data.user?.accessToken || user2Data.user?.accessToken, allTrackIds, refreshAccessToken, user1Data.user?.accessToken ? 'user' : 'user2');
+    // Filter tracks by feature similarity (simple: keep tracks within 1 stddev of mean for each feature)
+    for (const featureName of audioFeaturesConfig.match) {
+      const values = Object.values(features).map(f => typeof f[featureName] === 'number' ? f[featureName] : null).filter(v => v !== null);
+      if (values.length === 0) continue;
+      const mean = values.reduce((a, b) => a + b, 0) / values.length;
+      const stddev = Math.sqrt(values.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / values.length);
+      allTopTracks = allTopTracks.filter(t => {
+        const f = features[t.id];
+        return f && typeof f[featureName] === 'number' && Math.abs(f[featureName] - mean) <= stddev;
+      });
     }
   }
 

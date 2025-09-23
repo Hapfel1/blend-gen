@@ -1,4 +1,4 @@
-import { getAuthURL, getTokenFromCode, getUserInfo } from './auth.js';
+import { getAuthURL, getTokenFromCode, getUserInfo } from './auth.mjs';
 import readline from 'readline';
 import fs from 'fs';
 
