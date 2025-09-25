@@ -209,5 +209,4 @@ import { getUserData } from './spotify-api.js';
 
 import { createBlend } from './blend-algorithm.js';
 
-// Run the blend generator
 generateBlend();

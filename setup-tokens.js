@@ -23,7 +23,7 @@ async function setupTokens() {
     const user1 = await getUserInfo(tokens1.accessToken);
     console.log(`User 1 authenticated: ${user1.display_name}\n`);
     
-    // User 2
+  // User 2
   console.log('User 2 Authentication:');
     console.log('1. Open this URL in your browser (preferably in an incognito/private window):');
     console.log(getAuthURL());

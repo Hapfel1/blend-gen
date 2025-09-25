@@ -258,28 +258,28 @@ export async function getUserData(token, refreshFn = null, userKey = 'user') {
   console.log('typeof api.me.top:', typeof api.me.top);
   try {
     console.log('Calling api.me.top for short_term tracks');
-    console.log('Params:', { time_range: 'short_term', limit: 30 });
+    console.log('Params:', { time_range: 'short_term', limit: 50 });
     let shortTerm;
     try {
-      shortTerm = await getTop('tracks', 'short_term', 30);
+      shortTerm = await getTop('tracks', 'short_term', 50);
     } catch (err) {
       console.error('[MAIN BLOCK ERROR] shortTerm:', err.response?.data || err.message);
       throw err;
     }
     console.log('Calling api.me.top for medium_term tracks');
-    console.log('Params:', { time_range: 'medium_term', limit: 20 });
+    console.log('Params:', { time_range: 'medium_term', limit: 50 });
     let mediumTerm;
     try {
-      mediumTerm = await getTop('tracks', 'medium_term', 20);
+      mediumTerm = await getTop('tracks', 'medium_term', 50);
     } catch (err) {
       console.error('[MAIN BLOCK ERROR] mediumTerm:', err.response?.data || err.message);
       throw err;
     }
     console.log('Calling api.me.top for long_term tracks');
-    console.log('Params:', { time_range: 'long_term', limit: 10 });
+    console.log('Params:', { time_range: 'long_term', limit: 50 });
     let longTerm;
     try {
-      longTerm = await getTop('tracks', 'long_term', 10);
+      longTerm = await getTop('tracks', 'long_term', 50);
     } catch (err) {
       console.error('[MAIN BLOCK ERROR] longTerm:', err.response?.data || err.message);
       throw err;

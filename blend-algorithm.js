@@ -20,7 +20,6 @@ export async function createBlend(user1Data, user2Data, blendConfig = { blendSty
   };
   const weighting = blendConfig.weighting || { playCount: false, recency: false };
   const audioFeaturesConfig = blendConfig.audioFeatures || { enabled: false, match: [] };
-  // ...existing code...
 	const fs = await import('fs/promises');
 	const historyPath = 'c:/Users/quird/code/my-blend/.blend-history.json';
 	let historyIds = [];
@@ -401,10 +400,12 @@ export async function createBlend(user1Data, user2Data, blendConfig = { blendSty
     }
   }
 
+
   // 5. Allow up to 10% repeats for favorites if not enough tracks (skip blocked artists)
   if (tracks.length < targetLength && historyIds.length > 0) {
     const repeatsAllowed = Math.floor(targetLength * 0.1);
     let repeatsAdded = 0;
+    const addedIds = new Set(tracks.map(t => t.id));
     for (const track of allTopTracks) {
       if (tracks.length >= targetLength) break;
       if (
@@ -412,10 +413,29 @@ export async function createBlend(user1Data, user2Data, blendConfig = { blendSty
         repeatsAdded < repeatsAllowed &&
         Array.isArray(track.artists) && track.artists.length > 0 &&
         !blockArtistIds.includes(track.artists[0].id) &&
-        !blockTrackIds.includes(track.id)
+        !blockTrackIds.includes(track.id) &&
+        !addedIds.has(track.id)
       ) {
         tracks.push({ ...track, source: 'repeat' });
+        addedIds.add(track.id);
         repeatsAdded++;
+      }
+    }
+  }
+  // 6. If still not enough tracks, fill with less prioritized tracks (no repeats)
+  if (tracks.length < targetLength) {
+    const addedIds = new Set(tracks.map(t => t.id));
+    for (const track of allTopTracks) {
+      if (tracks.length >= targetLength) break;
+      if (
+        !historyIds.includes(track.id) &&
+        Array.isArray(track.artists) && track.artists.length > 0 &&
+        !blockArtistIds.includes(track.artists[0].id) &&
+        !blockTrackIds.includes(track.id) &&
+        !addedIds.has(track.id)
+      ) {
+        tracks.push({ ...track, source: 'filler' });
+        addedIds.add(track.id);
       }
     }
   }
