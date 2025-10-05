@@ -21,33 +21,48 @@ export async function createBlend(user1Data, user2Data, blendConfig = { blendSty
   const weighting = blendConfig.weighting || { playCount: false, recency: false };
   const audioFeaturesConfig = blendConfig.audioFeatures || { enabled: false, match: [] };
 	const fs = await import('fs/promises');
-	const historyPath = 'c:/Users/quird/code/my-blend/.blend-history.json';
+	const historyPath = './.blend-history.json';
 	let historyIds = [];
 	try {
     const historyRaw = await fs.readFile(historyPath, 'utf8');
     const historyData = JSON.parse(historyRaw);
     if (Array.isArray(historyData.blends)) {
-      const lastBlends = historyData.blends.slice(-2);
+      const lastBlends = historyData.blends.slice(-3);
       historyIds = lastBlends.flatMap(b => b.trackIds || []);
+      console.log(`History loaded: ${historyData.blends.length} total blends, using last ${lastBlends.length} blends`);
+      console.log(`Avoiding ${historyIds.length} tracks from previous blends`);
     } else if (Array.isArray(historyData.trackIds)) {
       historyIds = historyData.trackIds;
+      console.log(`Legacy history format: avoiding ${historyIds.length} tracks`);
     }
-  } catch (err) {}
+  } catch (err) {
+    console.log('No history file found, starting fresh');
+  }
+
+  // Track how many tracks get blocked by history during this blend
+  let historyBlockedCount = 0;
+  const isBlockedByHistory = (trackId) => {
+    const blocked = historyIds.includes(trackId);
+    if (blocked) {
+      historyBlockedCount++;
+    }
+    return blocked;
+  };
 
   // Load always-include, block-artists, and block-tracks
   let alwaysIncludeIds = [];
   let blockArtistIds = [];
   let blockTrackIds = [];
   try {
-    const alwaysRaw = await fs.readFile('c:/Users/quird/code/my-blend/always-include.json', 'utf8');
+    const alwaysRaw = await fs.readFile('./always-include.json', 'utf8');
     alwaysIncludeIds = JSON.parse(alwaysRaw);
   } catch {}
   try {
-    const blockRaw = await fs.readFile('c:/Users/quird/code/my-blend/block-artists.json', 'utf8');
+    const blockRaw = await fs.readFile('./block-artists.json', 'utf8');
     blockArtistIds = JSON.parse(blockRaw);
   } catch {}
   try {
-    const blockTrackRaw = await fs.readFile('c:/Users/quird/code/my-blend/block-tracks.json', 'utf8');
+    const blockTrackRaw = await fs.readFile('./block-tracks.json', 'utf8');
     blockTrackIds = JSON.parse(blockTrackRaw);
   } catch {}
 
@@ -92,6 +107,7 @@ export async function createBlend(user1Data, user2Data, blendConfig = { blendSty
   const tracks = [];
   // Use playlistLength from config
   const targetLength = blendConfig.playlistLength || 50;
+  console.log(`TARGET LENGTH: ${targetLength} tracks`);
   // Use discoveryPercent from config
   const discoveryPercent = blendConfig.discoveryPercent || 20;
   // Use blendStyle from config
@@ -142,8 +158,9 @@ export async function createBlend(user1Data, user2Data, blendConfig = { blendSty
   }
   // Add always-included tracks first (ignore history)
   for (const t of alwaysIncludedTracks) {
-  tracks.push(t);
+    tracks.push(t);
   }
+  console.log(`After always-include: ${tracks.length} tracks`);
 
   // 1. Blend logic by style
   const user1RecentIds = new Set(user1Data.recentTracks.map(t => t.id));
@@ -172,6 +189,9 @@ export async function createBlend(user1Data, user2Data, blendConfig = { blendSty
   if (sources.newReleaseTracks) {
     allTopTracks.push(...(user1Data.newReleaseTracks || []), ...(user2Data.newReleaseTracks || []));
   }
+  
+  console.log(`Total tracks before filtering: ${allTopTracks.length}`);
+  
   const user1ArtistIds = new Set((user1Data.artists || []).map(a => a.id));
   const user2ArtistIds = new Set((user2Data.artists || []).map(a => a.id));
 
@@ -200,7 +220,7 @@ export async function createBlend(user1Data, user2Data, blendConfig = { blendSty
         ...(user2Data.savedAlbumTracks || []),
         ...(user2Data.playlistTracks || [])
       ].some(t => t && t.id === track.id);
-      if (inUser1 && inUser2 && !historyIds.includes(track.id)) {
+      if (inUser1 && inUser2 && !isBlockedByHistory(track.id)) {
   tracks.push({ ...track, source: 'classic' });
       }
       if (tracks.length >= targetLength) break;
@@ -211,7 +231,7 @@ export async function createBlend(user1Data, user2Data, blendConfig = { blendSty
     for (let i = 0; i < sharedRecent.length && tracks.length < targetLength * 0.2; i++) {
       const track = sharedRecent[i];
       if (
-        !historyIds.includes(track.id) &&
+        !isBlockedByHistory(track.id) &&
         Array.isArray(track.artists) && track.artists.length > 0 &&
         !blockArtistIds.includes(track.artists[0].id) &&
         !blockTrackIds.includes(track.id)
@@ -269,7 +289,7 @@ export async function createBlend(user1Data, user2Data, blendConfig = { blendSty
             const mainArtist = track.artists[0]?.id;
             if (blockArtistIds.includes(mainArtist)) continue;
             if (blockTrackIds.includes(track.id)) continue;
-            if (!historyIds.includes(track.id)) {
+            if (!isBlockedByHistory(track.id)) {
               tracks.push({ ...track, source: 'wild-discovery' });
             }
             if (tracks.length >= targetLength) break;
@@ -286,7 +306,7 @@ export async function createBlend(user1Data, user2Data, blendConfig = { blendSty
       const mainArtist = track.artists[0]?.id;
       if (blockArtistIds.includes(mainArtist)) continue;
       if (blockTrackIds.includes(track.id)) continue;
-      if (!historyIds.includes(track.id)) {
+      if (!isBlockedByHistory(track.id)) {
         tracks.push({ ...track, source: 'wild-diversity' });
       }
       if (tracks.length >= targetLength) break;
@@ -296,7 +316,7 @@ export async function createBlend(user1Data, user2Data, blendConfig = { blendSty
     for (let i = 0; i < sharedRecent.length && tracks.length < targetLength * 0.3; i++) {
       const track = sharedRecent[i];
       if (
-        !historyIds.includes(track.id) &&
+        !isBlockedByHistory(track.id) &&
         Array.isArray(track.artists) && track.artists.length > 0 &&
         !blockArtistIds.includes(track.artists[0].id) &&
         !blockTrackIds.includes(track.id)
@@ -311,7 +331,7 @@ export async function createBlend(user1Data, user2Data, blendConfig = { blendSty
       if (blockArtistIds.includes(mainArtist)) continue;
       if (blockTrackIds.includes(track.id)) continue;
       if (mainArtist && user1ArtistIds.has(mainArtist) && user2ArtistIds.has(mainArtist) && tracks.length < targetLength * 0.5) {
-        if (!historyIds.includes(track.id)) {
+        if (!isBlockedByHistory(track.id)) {
           tracks.push({ ...track, source: 'shared-artist' });
         }
       }
@@ -364,7 +384,7 @@ export async function createBlend(user1Data, user2Data, blendConfig = { blendSty
             const mainArtist = track.artists[0]?.id;
             if (blockArtistIds.includes(mainArtist)) continue;
             if (blockTrackIds.includes(track.id)) continue;
-            if (!historyIds.includes(track.id)) {
+            if (!isBlockedByHistory(track.id)) {
               tracks.push({ ...track, source: 'discovery' });
             }
             if (tracks.length >= targetLength) break;
@@ -393,13 +413,14 @@ export async function createBlend(user1Data, user2Data, blendConfig = { blendSty
         if (genreCount[genre] > 5) genreOk = false;
       }
       if (!genreOk) continue;
-      if (!historyIds.includes(track.id)) {
+      if (!isBlockedByHistory(track.id)) {
         tracks.push({ ...track, source: 'diversity' });
       }
       if (tracks.length >= targetLength) break;
     }
   }
 
+  console.log(`After main blend logic: ${tracks.length} tracks`);
 
   // 5. Allow up to 10% repeats for favorites if not enough tracks (skip blocked artists)
   if (tracks.length < targetLength && historyIds.length > 0) {
@@ -409,7 +430,7 @@ export async function createBlend(user1Data, user2Data, blendConfig = { blendSty
     for (const track of allTopTracks) {
       if (tracks.length >= targetLength) break;
       if (
-        historyIds.includes(track.id) &&
+        isBlockedByHistory(track.id) &&
         repeatsAdded < repeatsAllowed &&
         Array.isArray(track.artists) && track.artists.length > 0 &&
         !blockArtistIds.includes(track.artists[0].id) &&
@@ -422,13 +443,15 @@ export async function createBlend(user1Data, user2Data, blendConfig = { blendSty
       }
     }
   }
+  console.log(`After allowing repeats: ${tracks.length} tracks`);
+  
   // 6. If still not enough tracks, fill with less prioritized tracks (no repeats)
   if (tracks.length < targetLength) {
     const addedIds = new Set(tracks.map(t => t.id));
     for (const track of allTopTracks) {
       if (tracks.length >= targetLength) break;
       if (
-        !historyIds.includes(track.id) &&
+        !isBlockedByHistory(track.id) &&
         Array.isArray(track.artists) && track.artists.length > 0 &&
         !blockArtistIds.includes(track.artists[0].id) &&
         !blockTrackIds.includes(track.id) &&
@@ -439,6 +462,41 @@ export async function createBlend(user1Data, user2Data, blendConfig = { blendSty
       }
     }
   }
+  console.log(`After filler tracks: ${tracks.length} tracks`);
+
+  // 7. Final fallback: fill with tracks from artists or genres liked by both users, even if repeats
+  if (tracks.length < targetLength) {
+    // Get shared artist IDs and genres
+    const user1ArtistIds = new Set((user1Data.artists || []).map(a => a.id));
+    const user2ArtistIds = new Set((user2Data.artists || []).map(a => a.id));
+    const sharedArtistIds = [...user1ArtistIds].filter(id => user2ArtistIds.has(id));
+    const user1Genres = new Set((user1Data.artists || []).flatMap(a => a.genres || []));
+    const user2Genres = new Set((user2Data.artists || []).flatMap(a => a.genres || []));
+    const sharedGenres = [...user1Genres].filter(g => user2Genres.has(g));
+    const addedIds = new Set(tracks.map(t => t.id));
+    for (const track of allTopTracks) {
+      if (tracks.length >= targetLength) break;
+      if (
+        Array.isArray(track.artists) && track.artists.length > 0 &&
+        !blockArtistIds.includes(track.artists[0].id) &&
+        !blockTrackIds.includes(track.id) &&
+        !addedIds.has(track.id) &&
+        !isBlockedByHistory(track.id)
+      ) {
+        const mainArtist = track.artists[0]?.id;
+        const trackGenres = track.artists[0]?.genres || [];
+        if (
+          sharedArtistIds.includes(mainArtist) ||
+          trackGenres.some(g => sharedGenres.includes(g))
+        ) {
+          tracks.push({ ...track, source: 'shared-artist-or-genre-fallback' });
+          addedIds.add(track.id);
+        }
+      }
+    }
+  }
+  console.log(`After shared artist/genre fallback: ${tracks.length} tracks`);
+  console.log(`History blocking stats: ${historyBlockedCount} tracks were skipped due to blend history`);
 
   // Weighting by play count/recency
   if (weighting.playCount || weighting.recency) {
@@ -473,6 +531,97 @@ export async function createBlend(user1Data, user2Data, blendConfig = { blendSty
 
   // Remove duplicates and shuffle
   const uniqueTracks = removeDuplicates(tracks);
+  console.log(`After removing duplicates: ${uniqueTracks.length} tracks (target: ${targetLength})`);
+
+  // Final aggressive padding if still short
+  if (uniqueTracks.length < targetLength) {
+    console.log(`Need ${targetLength - uniqueTracks.length} more tracks. Trying aggressive padding...`);
+    const addedIds = new Set(uniqueTracks.map(t => t.id));
+    
+    // Get ALL available tracks from both users, ignoring most filters
+    const allAvailableTracks = [
+      ...(user1Data.shortTerm || []),
+      ...(user2Data.shortTerm || []),
+      ...(user1Data.mediumTerm || []),
+      ...(user2Data.mediumTerm || []),
+      ...(user1Data.longTerm || []),
+      ...(user2Data.longTerm || []),
+      ...(user1Data.likedSongs || []),
+      ...(user2Data.likedSongs || []),
+      ...(user1Data.savedAlbumTracks || []),
+      ...(user2Data.savedAlbumTracks || []),
+      ...(user1Data.playlistTracks || []),
+      ...(user2Data.playlistTracks || []),
+      ...(user1Data.recentTracks || []),
+      ...(user2Data.recentTracks || []),
+      ...(user1Data.newReleaseTracks || []),
+      ...(user2Data.newReleaseTracks || [])
+    ];
+
+    // Filter for basic validity, not already added, respect block lists, AND respect history
+    const paddingTracks = allAvailableTracks.filter(track => 
+      track && 
+      track.id && 
+      Array.isArray(track.artists) && 
+      track.artists.length > 0 &&
+      !addedIds.has(track.id) &&
+      !blockArtistIds.includes(track.artists[0].id) &&
+      !blockTrackIds.includes(track.id) &&
+      !isBlockedByHistory(track.id)  // Respect blend history - no repeats
+    );
+
+    console.log(`Found ${paddingTracks.length} additional tracks for padding`);
+
+    // Add tracks until we reach target, prioritizing tracks that appear in both users' data
+    const user1TrackIds = new Set([
+      ...(user1Data.shortTerm || []).map(t => t.id),
+      ...(user1Data.mediumTerm || []).map(t => t.id),
+      ...(user1Data.longTerm || []).map(t => t.id),
+      ...(user1Data.likedSongs || []).map(t => t.id),
+      ...(user1Data.savedAlbumTracks || []).map(t => t.id),
+      ...(user1Data.playlistTracks || []).map(t => t.id),
+      ...(user1Data.recentTracks || []).map(t => t.id)
+    ]);
+    
+    const user2TrackIds = new Set([
+      ...(user2Data.shortTerm || []).map(t => t.id),
+      ...(user2Data.mediumTerm || []).map(t => t.id),
+      ...(user2Data.longTerm || []).map(t => t.id),
+      ...(user2Data.likedSongs || []).map(t => t.id),
+      ...(user2Data.savedAlbumTracks || []).map(t => t.id),
+      ...(user2Data.playlistTracks || []).map(t => t.id),
+      ...(user2Data.recentTracks || []).map(t => t.id)
+    ]);
+
+    // Sort padding tracks: shared tracks first, then individual tracks
+    paddingTracks.sort((a, b) => {
+      const aShared = user1TrackIds.has(a.id) && user2TrackIds.has(a.id);
+      const bShared = user1TrackIds.has(b.id) && user2TrackIds.has(b.id);
+      if (aShared && !bShared) return -1;
+      if (!aShared && bShared) return 1;
+      return 0;
+    });
+
+    for (const track of paddingTracks) {
+      if (uniqueTracks.length >= targetLength) break;
+      // Double-check for duplicates before adding
+      if (!addedIds.has(track.id)) {
+        uniqueTracks.push({ ...track, source: 'aggressive-padding' });
+        addedIds.add(track.id);
+      }
+    }
+
+    // Remove duplicates again after aggressive padding
+    const finalUniqueCount = uniqueTracks.length;
+    uniqueTracks.splice(0, uniqueTracks.length, ...removeDuplicates(uniqueTracks));
+    console.log(`After aggressive padding: ${finalUniqueCount} tracks, after dedup: ${uniqueTracks.length} tracks`);
+  }
+
+  // Final check - if we STILL don't have enough tracks, log warning but continue
+  if (uniqueTracks.length < targetLength) {
+    console.warn(`Warning: Only found ${uniqueTracks.length} unique tracks, target was ${targetLength}`);
+    console.warn('This might indicate limited music data or overly restrictive filtering');
+  }
 
   // Save new blend history (append to blends array, keep last 2)
   try {
@@ -480,15 +629,18 @@ export async function createBlend(user1Data, user2Data, blendConfig = { blendSty
     try {
       const historyRaw = await fs.readFile(historyPath, 'utf8');
       const historyData = JSON.parse(historyRaw);
-      if (Array.isArray(historyData.blends)) blends = historyData.blends;
+      if (Array.isArray(historyData.blends)) blends = historyData.blends.slice(-3);
     } catch {}
     blends.push({ trackIds: uniqueTracks.map(t => t.id) });
-    if (blends.length > 2) blends = blends.slice(-2);
+    if (blends.length > 3) blends = blends.slice(-3);
     await fs.writeFile(historyPath, JSON.stringify({ blends }), 'utf8');
+    console.log(`Saved blend history: now tracking ${blends.length} blends with ${blends.reduce((sum, b) => sum + (b.trackIds?.length || 0), 0)} total tracks`);
   } catch (err) {
-    // Ignore write errors
+    console.warn('Failed to save blend history:', err.message);
   }
 
-  return shuffleTracks(uniqueTracks).slice(0, targetLength);
+  const finalTracks = shuffleTracks(uniqueTracks).slice(0, targetLength);
+  console.log(`Final blend: ${finalTracks.length} tracks`);
+  return finalTracks;
 }
 

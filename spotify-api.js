@@ -34,27 +34,60 @@ export async function getFollowedArtists(token, refreshFn = null, userKey = 'use
   return artists;
 }
 
-// Fetch new releases for a list of artist IDs
+// Add rate limiting delay function
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Fetch new releases for a list of artist IDs with rate limiting
 export async function getNewReleasesForFollowedArtists(token, artistIds, refreshFn = null, userKey = 'user') {
   let newReleaseTracks = [];
-  for (const artistId of artistIds) {
+  console.log(`Fetching new releases for ${artistIds.length} artists with rate limiting...`);
+  
+  // Limit to max 50 artists to prevent excessive API calls
+  const limitedArtistIds = artistIds.slice(0, 50);
+  
+  for (let i = 0; i < limitedArtistIds.length; i++) {
+    const artistId = limitedArtistIds[i];
     try {
+      // Add delay between artist requests (1.2 seconds = 50 requests per minute)
+      if (i > 0) {
+        await delay(1200);
+      }
+      
       const albumsRes = await fetchWithRetry(
-        (tk) => axios.get(`https://api.spotify.com/v1/artists/${artistId}/albums?include_groups=album,single&limit=5`, { headers: { Authorization: `Bearer ${tk}` } }),
+        (tk) => axios.get(`https://api.spotify.com/v1/artists/${artistId}/albums?include_groups=album,single&limit=3`, { headers: { Authorization: `Bearer ${tk}` } }),
         token, refreshFn, userKey
       );
       const albums = albumsRes.data.items;
-      for (const album of albums) {
-        const tracksRes = await fetchWithRetry(
-          (tk) => axios.get(`https://api.spotify.com/v1/albums/${album.id}/tracks`, { headers: { Authorization: `Bearer ${tk}` } }),
-          token, refreshFn, userKey
-        );
-        newReleaseTracks = newReleaseTracks.concat(tracksRes.data.items);
+      
+      for (let j = 0; j < albums.length; j++) {
+        const album = albums[j];
+        try {
+          // Add smaller delay between album track requests (500ms)
+          if (j > 0) {
+            await delay(500);
+          }
+          
+          const tracksRes = await fetchWithRetry(
+            (tk) => axios.get(`https://api.spotify.com/v1/albums/${album.id}/tracks`, { headers: { Authorization: `Bearer ${tk}` } }),
+            token, refreshFn, userKey
+          );
+          newReleaseTracks = newReleaseTracks.concat(tracksRes.data.items);
+        } catch (albumErr) {
+          console.warn(`Failed to fetch tracks for album ${album.id}:`, albumErr?.response?.data || albumErr.message);
+        }
       }
+      
+      // Progress indicator
+      if ((i + 1) % 10 === 0) {
+        console.log(`Processed ${i + 1}/${limitedArtistIds.length} artists...`);
+      }
+      
     } catch (err) {
       console.warn(`Failed to fetch new releases for artist ${artistId}:`, err?.response?.data || err.message);
     }
   }
+  
+  console.log(`Found ${newReleaseTracks.length} new release tracks from ${limitedArtistIds.length} artists`);
   return newReleaseTracks.filter(t => t && typeof t === 'object' && t.id);
 }
 const CLIENT_ID = process.env.SPOTIFY_CLIENT_ID;
@@ -62,8 +95,19 @@ const CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET;
 import axios from 'axios';
 import { SpotifyAPI } from '@statsfm/spotify.js';
 
-// Universal fetch with retry on 401
+// Global rate limiting - track last request time
+let lastRequestTime = 0;
+const MIN_REQUEST_INTERVAL = 100; // 100ms between requests (10 requests per second)
+
+// Universal fetch with retry on 401 and rate limiting
 export async function fetchWithRetry(requestFn, token, refreshFn, userKey) {
+  // Rate limiting: ensure minimum interval between requests
+  const now = Date.now();
+  const timeSinceLastRequest = now - lastRequestTime;
+  if (timeSinceLastRequest < MIN_REQUEST_INTERVAL) {
+    await delay(MIN_REQUEST_INTERVAL - timeSinceLastRequest);
+  }
+  lastRequestTime = Date.now();
   let triedRefresh = false;
   let latestToken = token;
   for (let attempt = 0; attempt < 2; attempt++) {

@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spotify Blend Generator</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1e1e2e, #181825);
+            min-height: 100vh;
+            padding: 20px;
+            color: #cdd6f4;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: #313244;
+            border-radius: 12px;
+            padding: 30px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+            border: 1px solid #45475a;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            color: #cba6f7;
+            font-size: 2.5em;
+            font-weight: 600;
+        }
+
+        .status-card {
+            background: #181825;
+            border: 1px solid #45475a;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .status-card h3 {
+            color: #cdd6f4;
+            margin-bottom: 15px;
+            font-weight: 500;
+        }
+
+        .button {
+            background: #cba6f7;
+            color: #1e1e2e;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin: 5px;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        .button:hover {
+            background: #b4befe;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(203, 166, 247, 0.3);
+        }
+
+        .button:disabled {
+            background: #6c7086;
+            color: #a6adc8;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .button.secondary {
+            background: #585b70;
+            color: #cdd6f4;
+        }
+
+        .button.secondary:hover {
+            background: #6c7086;
+            color: #cdd6f4;
+        }
+
+        .logs {
+            background: #11111b;
+            border: 1px solid #313244;
+            border-radius: 8px;
+            padding: 20px;
+            margin-top: 20px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+        }
+
+        .log-entry {
+            margin-bottom: 5px;
+            padding: 5px;
+            border-radius: 3px;
+        }
+
+        .log-entry.info {
+            color: #a6e3a1;
+        }
+
+        .log-entry.error {
+            color: #f38ba8;
+            background: rgba(243, 139, 168, 0.1);
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+
+        .status-indicator.running {
+            background: #a6e3a1;
+            animation: pulse 2s infinite;
+        }
+
+        .status-indicator.idle {
+            background: #6c7086;
+        }
+
+        .status-indicator.success {
+            background: #a6e3a1;
+        }
+
+        .status-indicator.error {
+            background: #f38ba8;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        .warning {
+            background: rgba(249, 226, 175, 0.1);
+            border: 1px solid #f9e2af;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+            color: #f9e2af;
+        }
+
+        .warning strong {
+            color: #fab387;
+        }
+
+        .timestamp {
+            color: #9399b2;
+            font-size: 12px;
+        }
+
+        pre {
+            color: #a6adc8;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Spotify Blend Generator</h1>
+
+        <div id="setup-warning" class="warning" style="display: none;">
+            <strong>Setup Required:</strong> You need to authenticate with Spotify first.
+            <a href="/auth/setup" class="button" style="margin-left: 10px;">Setup Authentication</a>
+        </div>
+
+        <div class="status-card">
+            <h3>Status</h3>
+            <p>
+                <span id="status-indicator" class="status-indicator idle"></span>
+                <span id="status-text">Idle</span>
+            </p>
+            <p class="timestamp" id="last-run">Never run</p>
+        </div>
+
+        <div class="status-card">
+            <h3>Controls</h3>
+            <button id="blend-btn" class="button">Generate Blend</button>
+            <button id="refresh-btn" class="button secondary">Refresh Status</button>
+        </div>
+
+        <div class="status-card">
+            <h3>Last Result</h3>
+            <div id="last-result">No previous runs</div>
+        </div>
+
+        <div id="logs-container" style="display: none;">
+            <h3>Live Logs</h3>
+            <div id="logs" class="logs"></div>
+        </div>
+    </div>
+
+    <script>
+        const statusIndicator = document.getElementById('status-indicator');
+        const statusText = document.getElementById('status-text');
+        const lastRun = document.getElementById('last-run');
+        const blendBtn = document.getElementById('blend-btn');
+        const refreshBtn = document.getElementById('refresh-btn');
+        const lastResult = document.getElementById('last-result');
+        const logsContainer = document.getElementById('logs-container');
+        const logs = document.getElementById('logs');
+        const setupWarning = document.getElementById('setup-warning');
+
+        let isPolling = false;
+
+        async function checkSetupStatus() {
+            try {
+                // Direct API call for standalone deployment
+                const response = await fetch('/api/setup-status');
+                const data = await response.json();
+
+                if (!data.hasTokens || !data.setupComplete) {
+                    setupWarning.style.display = 'block';
+                    blendBtn.disabled = true;
+                    return false;
+                } else {
+                    setupWarning.style.display = 'none';
+                    blendBtn.disabled = false;
+                    return true;
+                }
+            } catch (error) {
+                console.error('Error checking setup status:', error);
+                setupWarning.style.display = 'block';
+                setupWarning.innerHTML = '<strong>Error:</strong> Could not check authentication status. Please refresh the page.';
+                return false;
+            }
+        }
+
+        async function updateStatus() {
+            try {
+                // Direct API call for standalone deployment
+                const response = await fetch('/api/status');
+                const data = await response.json();
+
+                // Update status indicator
+                statusIndicator.className = `status-indicator ${data.running ? 'running' : 'idle'}`;
+                statusText.textContent = data.running ? 'Running blend...' : 'Idle';
+
+                // Update last run time
+                if (data.lastRun) {
+                    lastRun.textContent = `Last run: ${new Date(data.lastRun).toLocaleString()}`;
+                }
+
+                // Update last result
+                if (data.lastResult) {
+                    const result = data.lastResult;
+                    const indicator = result.success ? '✅' : '❌';
+                    lastResult.innerHTML = `
+                        <p>${indicator} ${result.success ? 'Success' : 'Failed'}
+                           <span class="timestamp">(${new Date(result.timestamp).toLocaleString()})</span></p>
+                        ${result.output ? `<pre style="margin-top: 10px; font-size: 12px; color: #ccc;">${result.output}</pre>` : ''}
+                    `;
+                }
+
+                // Update logs if running
+                if (data.running || data.logs.length > 0) {
+                    logsContainer.style.display = 'block';
+                    logs.innerHTML = data.logs.map(log =>
+                        `<div class="log-entry ${log.type}">
+                            <span class="timestamp">[${new Date(log.timestamp).toLocaleTimeString()}]</span>
+                            ${log.message}
+                         </div>`
+                    ).join('');
+                    logs.scrollTop = logs.scrollHeight;
+                } else {
+                    logsContainer.style.display = 'none';
+                }
+
+                // Enable/disable blend button
+                blendBtn.disabled = data.running;
+
+                // Continue polling if running
+                if (data.running && !isPolling) {
+                    isPolling = true;
+                    setTimeout(pollStatus, 2000);
+                } else if (!data.running) {
+                    isPolling = false;
+                }
+
+            } catch (error) {
+                console.error('Error updating status:', error);
+                statusText.textContent = 'Error fetching status';
+            }
+        }
+
+        async function pollStatus() {
+            await updateStatus();
+            const response = await fetch('/api/status');
+            const data = await response.json();
+
+            if (data.running) {
+                setTimeout(pollStatus, 2000);
+            } else {
+                isPolling = false;
+            }
+        }
+
+        async function startBlend() {
+            try {
+                // Direct API call for standalone deployment
+                const response = await fetch('/api/blend', { method: 'POST' });
+                const data = await response.json();
+
+                if (response.ok) {
+                    isPolling = true;
+                    setTimeout(pollStatus, 1000);
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            } catch (error) {
+                console.error('Error starting blend:', error);
+                alert('Error starting blend');
+            }
+        }
+
+        // Event listeners
+        blendBtn.addEventListener('click', startBlend);
+        refreshBtn.addEventListener('click', updateStatus);
+
+        // Initial load
+        checkSetupStatus().then(hasSetup => {
+            if (hasSetup) {
+                updateStatus();
+            }
+        });
+    </script>
+</body>
+</html>

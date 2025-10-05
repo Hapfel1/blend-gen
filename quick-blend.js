@@ -44,7 +44,7 @@ async function generateBlend() {
     let blendConfig = { blendStyle: 'creative', discoveryPercent: 20, playlistLength: 50 };
     try {
       const fs = await import('fs');
-      const configRaw = fs.readFileSync('c:/Users/quird/code/my-blend/blend-config.json', 'utf8');
+      const configRaw = fs.readFileSync('./blend-config.json', 'utf8');
       blendConfig = JSON.parse(configRaw);
     } catch (err) {
       console.warn('Could not read blend-config.json, using defaults.', err.message);
