@@ -1,4 +1,3 @@
-
 import axios from 'axios';
 
 export async function createPlaylist(token, tracks, user1, user2) {
@@ -34,7 +33,7 @@ export async function createPlaylist(token, tracks, user1, user2) {
 		if (!playlistId) {
 			// Create playlist
 			const playlistRes = await axios.post(
-				`https://api.spotify.com/v1/users/${userId}/playlists`,
+				`https://api.spotify.com/v1/me/playlists`,
 				{
 					name: playlistName,
 					description: description,
@@ -55,7 +54,7 @@ export async function createPlaylist(token, tracks, user1, user2) {
 		} else {
 			// Clear existing tracks before updating
 			await axios.put(
-				`https://api.spotify.com/v1/playlists/${playlistId}/tracks`,
+				`https://api.spotify.com/v1/playlists/${playlistId}/items`,
 				{ uris: [] },
 				{
 					headers: {
@@ -70,7 +69,7 @@ export async function createPlaylist(token, tracks, user1, user2) {
 		for (let i = 0; i < trackUris.length; i += batchSize) {
 			const batch = trackUris.slice(i, i + batchSize);
 			await axios.post(
-				`https://api.spotify.com/v1/playlists/${playlistId}/tracks`,
+				`https://api.spotify.com/v1/playlists/${playlistId}/items`,
 				{ uris: batch },
 				{
 					headers: {
@@ -86,4 +85,3 @@ export async function createPlaylist(token, tracks, user1, user2) {
 		throw error;
 	}
 }
-

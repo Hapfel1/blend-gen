@@ -7,7 +7,7 @@ sudo mkdir -p /opt/spotify-blend-standalone
 
 # Copy files
 sudo cp /tmp/server-standalone.js /opt/spotify-blend-standalone/server.js
-sudo cp /tmp/index-fixed.html /opt/spotify-blend-standalone/index.html
+sudo cp /tmp/index-catppuccin.html /opt/spotify-blend-standalone/index.html
 sudo cp /tmp/*.js /opt/spotify-blend-standalone/ 2>/dev/null || true
 sudo cp /tmp/package.json /opt/spotify-blend-standalone/ 2>/dev/null || true
 

@@ -1,20 +1,27 @@
 // Fetch audio features for a list of track IDs
+// NOTE: Batch endpoint (GET /audio-features?ids=) was removed in Feb 2026.
+// Fetching individually now with concurrency limit to respect rate limits.
 export async function getAudioFeatures(token, trackIds, refreshFn = null, userKey = 'user') {
   if (!Array.isArray(trackIds) || trackIds.length === 0) return {};
   const features = {};
-  // Spotify API allows up to 100 IDs per request
-  for (let i = 0; i < trackIds.length; i += 100) {
-    const batch = trackIds.slice(i, i + 100);
-    try {
-      const res = await fetchWithRetry(
-        (tk) => axios.get(`https://api.spotify.com/v1/audio-features?ids=${batch.join(',')}`, { headers: { Authorization: `Bearer ${tk}` } }),
-        token, refreshFn, userKey
-      );
-      for (const f of res.data.audio_features) {
+  const CONCURRENCY = 5; // fetch 5 at a time to stay within rate limits
+  for (let i = 0; i < trackIds.length; i += CONCURRENCY) {
+    const batch = trackIds.slice(i, i + CONCURRENCY);
+    const results = await Promise.allSettled(
+      batch.map(id =>
+        fetchWithRetry(
+          (tk) => axios.get(`https://api.spotify.com/v1/audio-features/${id}`, { headers: { Authorization: `Bearer ${tk}` } }),
+          token, refreshFn, userKey
+        )
+      )
+    );
+    for (const result of results) {
+      if (result.status === 'fulfilled') {
+        const f = result.value.data;
         if (f && f.id) features[f.id] = f;
+      } else {
+        console.warn('Failed to fetch audio features for a track:', result.reason?.response?.data || result.reason?.message);
       }
-    } catch (err) {
-      console.warn('Failed to fetch audio features:', err?.response?.data || err.message);
     }
   }
   return features;
@@ -265,14 +272,20 @@ export async function getUserData(token, refreshFn = null, userKey = 'user') {
     playlists = playlists.filter(p => p.public || p.collaborative);
     let playlistTracks = [];
     for (const playlist of playlists) {
-      let nextTrackUrl = `https://api.spotify.com/v1/playlists/${playlist.id}/tracks?limit=100`;
+      let nextTrackUrl = `https://api.spotify.com/v1/playlists/${playlist.id}/items?limit=100`;
       while (nextTrackUrl) {
         try {
           const trackRes = await fetchWithRetry(
             (tk) => axios.get(nextTrackUrl, { headers: { Authorization: `Bearer ${tk}` } }),
             token, refreshFn, userKey
           );
-          playlistTracks = playlistTracks.concat(trackRes.data.items.map(item => item.track));
+          // NOTE: As of Feb 2026, items may be absent for playlists the user doesn't own or collaborate on
+          if (!trackRes.data.items) {
+            console.log(`Skipping playlist "${playlist.name}" - items not accessible (not owned or collaborative)`);
+            break;
+          }
+          // NOTE: As of Feb 2026, the field is renamed from .track to .item
+          playlistTracks = playlistTracks.concat(trackRes.data.items.map(item => item.item));
           nextTrackUrl = trackRes.data.next;
         } catch (err) {
           console.error(`[ERROR] getPlaylistTracks (tracks): playlist ${playlist.name}`);
@@ -394,5 +407,3 @@ export async function getUserData(token, refreshFn = null, userKey = 'user') {
     throw error;
   }
 }
-
-
